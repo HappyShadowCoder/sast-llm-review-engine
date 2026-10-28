@@ -1,0 +1,6 @@
+{
+  "include": ["apps/api-gateway/src/services/repo_analyzer.py"],
+  "extraPaths": [
+    "apps/api-gateway/src"
+  ]
+}

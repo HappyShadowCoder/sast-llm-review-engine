@@ -1,0 +1,10 @@
+pydantic>=2.7.0
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+# Core training dependencies (on CUDA-enabled GPU servers):
+# unsloth>=2024.5
+# trl>=0.8.6
+# peft>=0.10.0
+# bitsandbytes>=0.43.0
+# transformers>=4.40.0
+# torch>=2.2.0

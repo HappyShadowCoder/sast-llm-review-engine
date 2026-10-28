@@ -1,0 +1,44 @@
+# Environments & Virtualenvs
+.venv/
+env/
+venv/
+ENV/
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node & Frontend
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment Variables & Secrets
+.env
+.env.local
+*.local
+
+# Database & Qdrant local storage
+*.sqlite3
+*.db
+qdrant_storage/
+pg_data/
+redis_data/
+
+# OS & Caches
+.DS_Store
+*/.DS_Store
+.ruff_cache/
