@@ -30,6 +30,33 @@
   --dp-motion-easing: ease-out;
 }
 
+.dark {
+  --dp-color-ground: #07090e;
+  --dp-color-ink: #f8fafc;
+  --dp-color-ink-secondary: #94a3b8;
+  --dp-color-ground-muted: #0d121f;
+  --dp-color-rule: #1e293b;
+  --dp-color-accent: #38bdf8;
+  --dp-color-field: #0d121f;
+  --dp-color-on-field: #f8fafc;
+  --dp-color-on-field-secondary: #64748b;
+  --dp-color-panel: #0b101d;
+  --dp-color-on-accent: #020617;
+}
+
+@keyframes dashFlow {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.edge-flow {
+  animation: dashFlow 1.2s linear infinite;
+}
+
 body {
   background-color: var(--dp-color-ground);
   color: var(--dp-color-ink);

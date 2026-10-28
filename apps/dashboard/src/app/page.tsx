@@ -40,6 +40,8 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
+  Sun,
+  Moon,
   Terminal,
   X,
   Zap,
@@ -112,6 +114,39 @@ export default function Home() {
   // Visual Call-Graph Canvas state
   const [graphZoom, setGraphZoom] = useState(1);
   const [focusedGraphNode, setFocusedGraphNode] = useState<string | null>(null);
+  const [graphLayoutMode, setGraphLayoutMode] = useState<"layered" | "cluster">("layered");
+  const [graphTierFilter, setGraphTierFilter] = useState<string>("all");
+  const [graphSearchQuery, setGraphSearchQuery] = useState<string>("");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  // Initialize theme from localStorage or system preference
+  useEffect(() => {
+    try {
+      const storedTheme = localStorage.getItem("aicr_theme") as "dark" | "light" | null;
+      const initial = storedTheme || "dark";
+      setTheme(initial);
+      if (initial === "dark") {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    } catch {
+      document.documentElement.classList.add("dark");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    try {
+      localStorage.setItem("aicr_theme", next);
+    } catch {}
+    if (next === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  };
 
   // FAQ disclosures state
   const [openFaq, setOpenFaq] = useState<Record<number, boolean>>({ 0: true });
@@ -306,52 +341,223 @@ export default function Home() {
     return [...classes.map((c) => ({ ...c, kind: "class" })), ...funcs.map((f) => ({ ...f, kind: "function" }))];
   }, [report, selectedFile]);
 
-  // Graph nodes & edges
-  const graphData = useMemo(() => {
-    if (!report) return { nodes: [], edges: [] };
-    const fileTree = report.file_tree || [];
-    const hotspots = report.architecture_advice?.coupling_hotspots || [];
-    const files = fileTree.map((f, i) => {
-      const isHotspot = hotspots.some((h) => h?.file_path === f?.path);
-      const hasIssues = (f?.issues_count || 0) > 0;
-      const angle = (i / (fileTree.length || 1)) * 2 * Math.PI;
-      const radius = 170;
-      return {
-        id: f?.path || `file-${i}`,
-        label: (f?.path || "").split("/").pop() || f?.path || "file",
-        fullPath: f?.path || "",
-        x: 320 + radius * Math.cos(angle),
-        y: 220 + radius * Math.sin(angle),
-        isHotspot,
-        hasIssues,
-        symbolsCount: f?.symbols_count || 0,
-        issuesCount: f?.issues_count || 0,
-      };
-    });
+  // Architectural Tier detection
+  const getFileTier = useCallback((filePath: string) => {
+    const p = filePath.toLowerCase();
+    if (p.includes("app.") || p.includes("main.") || p.includes("server.") || p.includes("index.")) {
+      return { tier: "entry", label: "Entrypoint", color: "#38bdf8", stroke: "#0284c7", icon: "🌐" };
+    }
+    if (p.includes("route") || p.includes("controller") || p.includes("endpoint") || p.includes("api/")) {
+      return { tier: "routes", label: "Route API", color: "#34d399", stroke: "#059669", icon: "🚦" };
+    }
+    if (p.includes("service") || p.includes("logic") || p.includes("domain") || p.includes("handler")) {
+      return { tier: "services", label: "Service", color: "#a855f7", stroke: "#7c3aed", icon: "⚙️" };
+    }
+    if (p.includes("ml") || p.includes("model") || p.includes("ai") || p.includes("predict") || p.includes("train")) {
+      return { tier: "ml", label: "ML Engine", color: "#f59e0b", stroke: "#d97706", icon: "🧠" };
+    }
+    if (p.includes("util") || p.includes("db") || p.includes("database") || p.includes("schema") || p.includes("sql") || p.includes("store")) {
+      return { tier: "data", label: "Data / DB", color: "#f43f5e", stroke: "#e11d48", icon: "🗄️" };
+    }
+    return { tier: "other", label: "Module", color: "#60a5fa", stroke: "#2563eb", icon: "📦" };
+  }, []);
 
-    const edges: Array<{ source: string; target: string; isHot: boolean }> = [];
+  // Graph nodes & edges with GitDiagram-style layered column layout
+  const graphData = useMemo(() => {
+    if (!report) return { nodes: [], edges: [], totalWidth: 1000, totalHeight: 500, activeTiers: [] };
+    const rawFiles = report.file_tree || [];
+    const hotspots = report.architecture_advice?.coupling_hotspots || [];
     const depMap = report.ast_insights?.dependency_map || [];
+    const astSymbols = report.ast_insights?.functions || [];
+    const astClasses = report.ast_insights?.classes || [];
+
+    // Filter files
+    let filteredFiles = rawFiles;
+    if (graphTierFilter !== "all") {
+      if (graphTierFilter === "flagged") {
+        filteredFiles = filteredFiles.filter((f) => (f.issues_count || 0) > 0 || hotspots.some((h) => h?.file_path === f.path));
+      } else {
+        filteredFiles = filteredFiles.filter((f) => getFileTier(f.path).tier === graphTierFilter);
+      }
+    }
+    if (graphSearchQuery.trim()) {
+      const q = graphSearchQuery.toLowerCase();
+      filteredFiles = filteredFiles.filter((f) => f.path.toLowerCase().includes(q));
+    }
+
+    if (filteredFiles.length === 0) {
+      filteredFiles = rawFiles;
+    }
+
+    // Pre-calculate inbound and outbound connections for all files
+    const inboundMap: Record<string, string[]> = {};
+    const outboundMap: Record<string, string[]> = {};
+    const rawEdges: Array<{ source: string; target: string; isHot: boolean }> = [];
+
     depMap.forEach((dep) => {
       if (!dep?.source || !dep?.target) return;
-      const sourceNode = files.find((n) => n.id === dep.source);
-      const targetNode = files.find((n) => n.id.includes(dep.target) || dep.target.includes(n.label));
-      if (sourceNode && targetNode && sourceNode.id !== targetNode.id) {
-        edges.push({
-          source: sourceNode.id,
-          target: targetNode.id,
-          isHot: sourceNode.isHotspot || targetNode.isHotspot,
-        });
+      const sNode = rawFiles.find((n) => n.path === dep.source);
+      // Smart matching target
+      const tNode = rawFiles.find((n) => {
+        if (n.path === dep.target) return true;
+        const stem = n.path.split("/").pop()?.split(".")[0];
+        if (stem && dep.target.includes(stem)) return true;
+        const pParts = n.path.split("/").filter((x) => x.length > 2 && x !== "backend" && x !== "src");
+        return pParts.some((part) => dep.target.includes(part));
+      });
+
+      if (sNode && tNode && sNode.path !== tNode.path) {
+        if (!outboundMap[sNode.path]) outboundMap[sNode.path] = [];
+        if (!outboundMap[sNode.path].includes(tNode.path)) outboundMap[sNode.path].push(tNode.path);
+
+        if (!inboundMap[tNode.path]) inboundMap[tNode.path] = [];
+        if (!inboundMap[tNode.path].includes(sNode.path)) inboundMap[tNode.path].push(sNode.path);
+
+        const exists = rawEdges.some((e) => e.source === sNode.path && e.target === tNode.path);
+        if (!exists) {
+          rawEdges.push({
+            source: sNode.path,
+            target: tNode.path,
+            isHot: hotspots.some((h) => h?.file_path === sNode.path || h?.file_path === tNode.path),
+          });
+        }
       }
     });
 
-    if (edges.length === 0 && files.length > 1) {
-      for (let i = 1; i < files.length; i++) {
-        edges.push({ source: files[0].id, target: files[i].id, isHot: files[0].isHotspot });
+    // Fallback edges if none matched so graph is always linked
+    if (rawEdges.length === 0 && filteredFiles.length > 1) {
+      for (let i = 1; i < filteredFiles.length; i++) {
+        rawEdges.push({
+          source: filteredFiles[0].path,
+          target: filteredFiles[i].path,
+          isHot: hotspots.some((h) => h?.file_path === filteredFiles[0].path),
+        });
       }
     }
 
-    return { nodes: files, edges };
-  }, [report]);
+    // Node placement
+    const CARD_W = 180;
+    const CARD_H = 48;
+
+    let nodes: Array<any> = [];
+    let totalWidth = 1000;
+    let totalHeight = 520;
+    let activeTiers: Array<{ tier: string; label: string; x: number }> = [];
+
+    if (graphLayoutMode === "layered") {
+      // 5 Tier Columns: Entry -> Routes -> Services -> ML -> Data/Other
+      const tierOrder: Array<"entry" | "routes" | "services" | "ml" | "data" | "other"> = [
+        "entry", "routes", "services", "ml", "data", "other"
+      ];
+      const columnGroups: Record<string, typeof filteredFiles> = {
+        entry: [],
+        routes: [],
+        services: [],
+        ml: [],
+        data: [],
+        other: [],
+      };
+
+      filteredFiles.forEach((f) => {
+        const t = getFileTier(f.path).tier;
+        columnGroups[t].push(f);
+      });
+
+      const validTiers = tierOrder.filter((t) => columnGroups[t].length > 0);
+      const colSpacing = validTiers.length <= 3 ? 280 : 230;
+      const startX = 60;
+      const maxRows = Math.max(...validTiers.map((t) => columnGroups[t].length), 4);
+      totalHeight = Math.max(500, maxRows * 75 + 130);
+      totalWidth = Math.max(1050, startX + validTiers.length * colSpacing + 120);
+
+      validTiers.forEach((tier, colIdx) => {
+        const colFiles = columnGroups[tier];
+        const colX = startX + colIdx * colSpacing;
+        const tierName = getFileTier(colFiles[0]?.path || "").label;
+        activeTiers.push({ tier, label: tierName, x: colX });
+
+        colFiles.forEach((f, rowIdx) => {
+          const colY = 90 + rowIdx * 75;
+          const tierInfo = getFileTier(f.path);
+          const isHotspot = hotspots.some((h) => h?.file_path === f.path);
+          const hasIssues = (f.issues_count || 0) > 0;
+          const fileSyms = astSymbols.filter((s) => s?.file_path === f.path);
+          const fileCls = astClasses.filter((c) => c?.file_path === f.path);
+
+          nodes.push({
+            id: f.path,
+            label: f.path.split("/").pop() || f.path,
+            fullPath: f.path,
+            tier: tierInfo.tier,
+            tierLabel: tierInfo.label,
+            color: tierInfo.color,
+            stroke: tierInfo.stroke,
+            icon: tierInfo.icon,
+            x: colX,
+            y: colY,
+            width: CARD_W,
+            height: CARD_H,
+            colIndex: colIdx,
+            isHotspot,
+            hasIssues,
+            symbolsCount: f.symbols_count || (fileSyms.length + fileCls.length),
+            issuesCount: f.issues_count || 0,
+            classesCount: fileCls.length,
+            functionsCount: fileSyms.length,
+            inboundCallers: inboundMap[f.path] || [],
+            outboundDependencies: outboundMap[f.path] || [],
+          });
+        });
+      });
+    } else {
+      // Radial Cluster Layout
+      const centerX = 500;
+      const centerY = 280;
+      const radius = Math.min(260, 80 + filteredFiles.length * 10);
+      totalWidth = 1000;
+      totalHeight = 560;
+
+      filteredFiles.forEach((f, i) => {
+        const angle = (i / (filteredFiles.length || 1)) * 2 * Math.PI;
+        const x = centerX + radius * Math.cos(angle) - CARD_W / 2;
+        const y = centerY + radius * Math.sin(angle) - CARD_H / 2;
+        const tierInfo = getFileTier(f.path);
+        const isHotspot = hotspots.some((h) => h?.file_path === f.path);
+        const hasIssues = (f.issues_count || 0) > 0;
+        const fileSyms = astSymbols.filter((s) => s?.file_path === f.path);
+        const fileCls = astClasses.filter((c) => c?.file_path === f.path);
+
+        nodes.push({
+          id: f.path,
+          label: f.path.split("/").pop() || f.path,
+          fullPath: f.path,
+          tier: tierInfo.tier,
+          tierLabel: tierInfo.label,
+          color: tierInfo.color,
+          stroke: tierInfo.stroke,
+          icon: tierInfo.icon,
+          x,
+          y,
+          width: CARD_W,
+          height: CARD_H,
+          colIndex: 0,
+          isHotspot,
+          hasIssues,
+          symbolsCount: f.symbols_count || (fileSyms.length + fileCls.length),
+          issuesCount: f.issues_count || 0,
+          classesCount: fileCls.length,
+          functionsCount: fileSyms.length,
+          inboundCallers: inboundMap[f.path] || [],
+          outboundDependencies: outboundMap[f.path] || [],
+        });
+      });
+    }
+
+    const visibleIds = new Set(nodes.map((n) => n.id));
+    const edges = rawEdges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
+
+    return { nodes, edges, totalWidth, totalHeight, activeTiers };
+  }, [report, graphLayoutMode, graphTierFilter, graphSearchQuery, getFileTier]);
 
   return (
     <div className="min-h-screen bg-ground text-ink flex flex-col font-sans">
@@ -446,6 +652,16 @@ export default function Home() {
             {(settings.openaiApiKey || settings.geminiApiKey || settings.githubToken) && (
               <span className="w-2 h-2 rounded-full bg-accent absolute top-1.5 right-1.5 ring-2 ring-panel" />
             )}
+          </button>
+
+          {/* Dark / Light Mode Toggle */}
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-lg border border-rule bg-panel hover:bg-ground-muted text-ink-secondary transition-all"
+            title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? <Sun className="w-4 h-4 text-amber-400 animate-in fade-in" /> : <Moon className="w-4 h-4 text-indigo-600 animate-in fade-in" />}
           </button>
         </div>
       </header>
@@ -793,145 +1009,566 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* INTERACTIVE VISUAL CALL-GRAPH & ARCHITECTURAL CANVAS */}
-                    <div className="p-6 rounded-xl border border-slate-800 bg-slate-900/70 space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    {/* GITDIAGRAM-STYLE INTERACTIVE ARCHITECTURAL & CALL-GRAPH CANVAS */}
+                    <div className="p-6 rounded-xl border border-rule bg-panel dark:bg-slate-900/80 dark:border-slate-800 space-y-4 shadow-sm transition-colors">
+                      {/* Top Bar: Title & Controls */}
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                         <div>
-                          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-ink dark:text-white">
                             <Network className="w-4 h-4 text-accent" />
                             <span>Interactive Architectural & Call-Graph Canvas</span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">
+                              GitDiagram Engine
+                            </span>
                           </div>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            Visualizes Tree-sitter module dependencies, import paths, and coupling hotspots. Click any node to focus.
+                          <p className="text-xs text-ink-secondary dark:text-slate-400 mt-0.5">
+                            Visualizes Tree-sitter module dependencies, import paths, and coupling hotspots across architectural layers. Click any node to focus callers and dependencies.
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setGraphZoom((z) => Math.max(0.6, z - 0.2))}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-                            title="Zoom Out"
-                          >
-                            <ZoomOut className="w-3.5 h-3.5" />
-                          </button>
-                          <span className="text-xs font-mono text-slate-400">{Math.round(graphZoom * 100)}%</span>
-                          <button
-                            onClick={() => setGraphZoom((z) => Math.min(1.8, z + 0.2))}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-                            title="Zoom In"
-                          >
-                            <ZoomIn className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setGraphZoom(1);
-                              setFocusedGraphNode(null);
-                            }}
-                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 font-mono"
-                          >
-                            Reset
-                          </button>
+
+                        {/* Top Controls: Layout switcher, Zoom, Reset */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* Layout Toggle */}
+                          <div className="flex items-center rounded-lg border border-rule dark:border-slate-800 bg-ground-muted dark:bg-slate-950 p-0.5">
+                            <button
+                              onClick={() => setGraphLayoutMode("layered")}
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                                graphLayoutMode === "layered"
+                                  ? "bg-accent text-white shadow-sm"
+                                  : "text-ink-secondary dark:text-slate-400 hover:text-ink dark:hover:text-white"
+                              }`}
+                            >
+                              Layered Flow
+                            </button>
+                            <button
+                              onClick={() => setGraphLayoutMode("cluster")}
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                                graphLayoutMode === "cluster"
+                                  ? "bg-accent text-white shadow-sm"
+                                  : "text-ink-secondary dark:text-slate-400 hover:text-ink dark:hover:text-white"
+                              }`}
+                            >
+                              Orbit Cluster
+                            </button>
+                          </div>
+
+                          {/* Zoom Controls */}
+                          <div className="flex items-center gap-1 bg-ground-muted dark:bg-slate-950 border border-rule dark:border-slate-800 rounded-lg p-0.5">
+                            <button
+                              onClick={() => setGraphZoom((z) => Math.max(0.5, z - 0.15))}
+                              className="p-1 rounded hover:bg-panel dark:hover:bg-slate-800 text-ink-secondary dark:text-slate-400"
+                              title="Zoom Out"
+                            >
+                              <ZoomOut className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="text-[11px] font-mono px-1.5 text-ink-secondary dark:text-slate-400">{Math.round(graphZoom * 100)}%</span>
+                            <button
+                              onClick={() => setGraphZoom((z) => Math.min(2.0, z + 0.15))}
+                              className="p-1 hover:bg-panel dark:hover:bg-slate-800 text-ink-secondary dark:text-slate-400"
+                              title="Zoom In"
+                            >
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setGraphZoom(1);
+                                setFocusedGraphNode(null);
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-mono text-ink-secondary dark:text-slate-400 hover:bg-panel dark:hover:bg-slate-800"
+                            >
+                              Reset
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      {/* SVG Canvas Area */}
-                      <div className="w-full h-[400px] rounded-lg bg-slate-950 border border-slate-800 relative overflow-hidden flex items-center justify-center">
+                      {/* Filter & Search Bar */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-rule dark:border-slate-800/80">
+                        {/* Tier Filters */}
+                        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
+                          {[
+                            { key: "all", label: `All (${report.file_tree?.length || 0})` },
+                            { key: "entry", label: "Entrypoint" },
+                            { key: "routes", label: "Routes & APIs" },
+                            { key: "services", label: "Services" },
+                            { key: "ml", label: "ML Engine" },
+                            { key: "data", label: "Data / DB" },
+                            { key: "flagged", label: "Flagged Only" },
+                          ].map((t) => (
+                            <button
+                              key={t.key}
+                              onClick={() => setGraphTierFilter(t.key)}
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-all ${
+                                graphTierFilter === t.key
+                                  ? "bg-accent/15 text-accent border border-accent/30 font-semibold"
+                                  : "text-ink-secondary dark:text-slate-400 hover:bg-ground-muted dark:hover:bg-slate-800 border border-transparent"
+                              }`}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Search Input */}
+                        <div className="relative min-w-[180px]">
+                          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-ink-secondary dark:text-slate-500" />
+                          <input
+                            type="text"
+                            value={graphSearchQuery}
+                            onChange={(e) => setGraphSearchQuery(e.target.value)}
+                            placeholder="Filter modules..."
+                            className="w-full text-xs pl-8 pr-2.5 py-1.5 rounded-lg border border-rule dark:border-slate-800 bg-ground dark:bg-slate-950 text-ink dark:text-white placeholder:text-ink-secondary/60 focus:outline-none focus:border-accent"
+                          />
+                          {graphSearchQuery && (
+                            <button
+                              onClick={() => setGraphSearchQuery("")}
+                              className="absolute right-2 top-2 text-ink-secondary dark:text-slate-500 hover:text-ink"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Main Canvas Area */}
+                      <div className="w-full h-[520px] rounded-lg bg-ground-muted/40 dark:bg-slate-950 border border-rule dark:border-slate-800 relative overflow-hidden flex items-center justify-center">
                         <svg
-                          viewBox="0 0 640 440"
-                          className="w-full h-full select-none"
-                          style={{ transform: `scale(${graphZoom})`, transformOrigin: "center center", transition: "transform 0.2s ease" }}
+                          viewBox={`0 0 ${graphData.totalWidth} ${graphData.totalHeight}`}
+                          className="w-full h-full select-none cursor-grab active:cursor-grabbing"
+                          style={{
+                            transform: `scale(${graphZoom})`,
+                            transformOrigin: "center center",
+                            transition: "transform 0.15s ease-out",
+                          }}
                         >
                           <defs>
+                            {/* Directional Arrow Marker */}
+                            <marker
+                              id="arrow"
+                              viewBox="0 0 10 10"
+                              refX="9"
+                              refY="5"
+                              markerWidth="6"
+                              markerHeight="6"
+                              orient="auto-start-reverse"
+                            >
+                              <path d="M 0 1 L 9 5 L 0 9 z" fill="#3b82f6" />
+                            </marker>
+                            <marker
+                              id="arrow-active"
+                              viewBox="0 0 10 10"
+                              refX="9"
+                              refY="5"
+                              markerWidth="6"
+                              markerHeight="6"
+                              orient="auto-start-reverse"
+                            >
+                              <path d="M 0 1 L 9 5 L 0 9 z" fill="#38bdf8" />
+                            </marker>
+                            <marker
+                              id="arrow-inbound"
+                              viewBox="0 0 10 10"
+                              refX="9"
+                              refY="5"
+                              markerWidth="6"
+                              markerHeight="6"
+                              orient="auto-start-reverse"
+                            >
+                              <path d="M 0 1 L 9 5 L 0 9 z" fill="#34d399" />
+                            </marker>
                             <linearGradient id="edgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                              <stop offset="0%" stopColor="#074ce0" stopOpacity="0.4" />
+                              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.4" />
                               <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.8" />
                             </linearGradient>
                             <linearGradient id="edgeHotGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.6" />
+                              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.7" />
                               <stop offset="100%" stopColor="#fb7185" stopOpacity="0.9" />
                             </linearGradient>
                           </defs>
 
-                          {/* Connections */}
+                          {/* Column Headers in Layered Mode */}
+                          {graphLayoutMode === "layered" &&
+                            (graphData.activeTiers || []).map((col, idx) => (
+                              <g key={idx} transform={`translate(${col.x}, 40)`}>
+                                <rect
+                                  x="0"
+                                  y="0"
+                                  width="180"
+                                  height="26"
+                                  rx="6"
+                                  fill={theme === "dark" ? "#1e293b" : "#e2e8f0"}
+                                  fillOpacity="0.6"
+                                />
+                                <text
+                                  x="90"
+                                  y="17"
+                                  textAnchor="middle"
+                                  fontSize="11"
+                                  fontFamily="monospace"
+                                  fontWeight="600"
+                                  fill={theme === "dark" ? "#94a3b8" : "#475569"}
+                                >
+                                  {col.label.toUpperCase()}
+                                </text>
+                              </g>
+                            ))}
+
+                          {/* Connector Edges */}
                           {(graphData.edges || []).map((edge, idx) => {
                             const sNode = graphData.nodes.find((n) => n.id === edge.source);
                             const tNode = graphData.nodes.find((n) => n.id === edge.target);
                             if (!sNode || !tNode) return null;
-                            const isHighlighted = focusedGraphNode === sNode.id || focusedGraphNode === tNode.id;
+
+                            const isOutboundFromFocused = focusedGraphNode === sNode.id;
+                            const isInboundToFocused = focusedGraphNode === tNode.id;
+                            const isFocusedPath = isOutboundFromFocused || isInboundToFocused;
+
+                            const sx = sNode.x + sNode.width;
+                            const sy = sNode.y + sNode.height / 2;
+                            const tx = tNode.x;
+                            const ty = tNode.y + tNode.height / 2;
+                            const cx1 = (sx + tx) / 2;
+
+                            // Cubic Bezier curve
+                            const pathData =
+                              graphLayoutMode === "layered"
+                                ? `M ${sx} ${sy} C ${cx1} ${sy}, ${cx1} ${ty}, ${tx} ${ty}`
+                                : `M ${sNode.x + sNode.width / 2} ${sNode.y + sNode.height / 2} L ${tNode.x + tNode.width / 2} ${tNode.y + tNode.height / 2}`;
+
+                            const strokeColor = isInboundToFocused
+                              ? "#34d399"
+                              : isOutboundFromFocused
+                              ? "#38bdf8"
+                              : edge.isHot
+                              ? "url(#edgeHotGrad)"
+                              : "url(#edgeGrad)";
+
+                            const strokeWidth = isFocusedPath ? 2.5 : edge.isHot ? 2 : 1.2;
+                            const opacity = focusedGraphNode ? (isFocusedPath ? 1 : 0.12) : 0.65;
+
                             return (
-                              <line
+                              <path
                                 key={idx}
-                                x1={sNode.x}
-                                y1={sNode.y}
-                                x2={tNode.x}
-                                y2={tNode.y}
-                                stroke={edge.isHot ? "url(#edgeHotGrad)" : "url(#edgeGrad)"}
-                                strokeWidth={isHighlighted ? 3 : 1.5}
-                                strokeDasharray={edge.isHot ? "4 3" : undefined}
-                                opacity={focusedGraphNode ? (isHighlighted ? 1 : 0.2) : 0.7}
+                                d={pathData}
+                                fill="none"
+                                stroke={strokeColor}
+                                strokeWidth={strokeWidth}
+                                strokeDasharray={isFocusedPath ? "6 4" : edge.isHot ? "4 3" : undefined}
+                                className={isFocusedPath ? "edge-flow" : undefined}
+                                opacity={opacity}
+                                markerEnd={
+                                  isInboundToFocused
+                                    ? "url(#arrow-inbound)"
+                                    : isOutboundFromFocused
+                                    ? "url(#arrow-active)"
+                                    : "url(#arrow)"
+                                }
                               />
                             );
                           })}
 
-                          {/* Nodes */}
+                          {/* Interactive Node Cards */}
                           {(graphData.nodes || []).map((node) => {
                             const isFocused = focusedGraphNode === node.id;
+                            const isConnectedToFocused =
+                              focusedGraphNode &&
+                              graphData.edges.some(
+                                (e) =>
+                                  (e.source === focusedGraphNode && e.target === node.id) ||
+                                  (e.target === focusedGraphNode && e.source === node.id)
+                              );
+                            const nodeOpacity = focusedGraphNode ? (isFocused || isConnectedToFocused ? 1 : 0.22) : 1;
+
                             return (
                               <g
                                 key={node.id}
                                 transform={`translate(${node.x}, ${node.y})`}
-                                className="cursor-pointer transition-all"
+                                className="cursor-pointer transition-transform"
+                                opacity={nodeOpacity}
                                 onClick={() => setFocusedGraphNode(isFocused ? null : node.id)}
                               >
+                                {/* Hotspot / Halo Ring */}
                                 {node.isHotspot && (
-                                  <circle r="26" fill="#f43f5e" fillOpacity="0.15" />
+                                  <rect
+                                    x="-3"
+                                    y="-3"
+                                    width={node.width + 6}
+                                    height={node.height + 6}
+                                    rx="11"
+                                    fill="#f43f5e"
+                                    fillOpacity="0.15"
+                                    stroke="#f43f5e"
+                                    strokeWidth="1"
+                                    strokeDasharray="4 3"
+                                  />
                                 )}
-                                <circle
-                                  r={isFocused ? "22" : "18"}
-                                  fill={node.isHotspot ? "#881337" : node.hasIssues ? "#451a03" : "#074ce0"}
-                                  stroke={isFocused ? "#ffffff" : node.isHotspot ? "#fb7185" : "#3b82f6"}
-                                  strokeWidth={isFocused ? "3" : "1.5"}
+
+                                {/* Focused active glow */}
+                                {isFocused && (
+                                  <rect
+                                    x="-3"
+                                    y="-3"
+                                    width={node.width + 6}
+                                    height={node.height + 6}
+                                    rx="11"
+                                    fill={node.color}
+                                    fillOpacity="0.2"
+                                    stroke={node.color}
+                                    strokeWidth="2"
+                                  />
+                                )}
+
+                                {/* Card Background */}
+                                <rect
+                                  x="0"
+                                  y="0"
+                                  width={node.width}
+                                  height={node.height}
+                                  rx="8"
+                                  fill={theme === "dark" ? "#0f172a" : "#ffffff"}
+                                  stroke={isFocused ? node.color : node.isHotspot ? "#fb7185" : theme === "dark" ? "#334155" : "#cbd5e1"}
+                                  strokeWidth={isFocused ? "2" : "1"}
+                                  className="transition-colors"
                                 />
+
+                                {/* Tier Color Accent Strip */}
+                                <rect
+                                  x="0"
+                                  y="0"
+                                  width="4"
+                                  height={node.height}
+                                  rx="2"
+                                  fill={node.color}
+                                />
+
+                                {/* Tier Icon & Tag */}
                                 <text
-                                  textAnchor="middle"
-                                  dy="4"
-                                  fill="#ffffff"
+                                  x="12"
+                                  y="16"
                                   fontSize="9"
+                                  fontFamily="sans-serif"
+                                  fontWeight="600"
+                                  fill={node.color}
+                                >
+                                  {node.icon} {node.tierLabel}
+                                </text>
+
+                                {/* File Name */}
+                                <text
+                                  x="12"
+                                  y="34"
+                                  fontSize="11"
                                   fontFamily="monospace"
                                   fontWeight="bold"
-                                  pointerEvents="none"
+                                  fill={theme === "dark" ? "#f8fafc" : "#0f172a"}
                                 >
-                                  {node.label.slice(0, 5)}
+                                  {node.label.length > 18 ? node.label.slice(0, 16) + "…" : node.label}
                                 </text>
-                                <text
-                                  textAnchor="middle"
-                                  dy="30"
-                                  fill={isFocused ? "#60a5fa" : "#94a3b8"}
-                                  fontSize="10"
-                                  fontFamily="monospace"
-                                  fontWeight={isFocused ? "bold" : "normal"}
-                                >
-                                  {node.label}
-                                </text>
+
+                                {/* Issues / Symbol Badge Pill on the right */}
+                                {node.hasIssues ? (
+                                  <g transform={`translate(${node.width - 34}, 8)`}>
+                                    <rect x="0" y="0" width="26" height="15" rx="4" fill="#881337" />
+                                    <text x="13" y="11" textAnchor="middle" fontSize="8" fontFamily="sans-serif" fontWeight="bold" fill="#fecdd3">
+                                      {node.issuesCount} ⚠️
+                                    </text>
+                                  </g>
+                                ) : (
+                                  <g transform={`translate(${node.width - 36}, 8)`}>
+                                    <rect x="0" y="0" width="28" height="15" rx="4" fill={theme === "dark" ? "#1e293b" : "#f1f5f9"} />
+                                    <text x="14" y="11" textAnchor="middle" fontSize="8" fontFamily="monospace" fill={theme === "dark" ? "#94a3b8" : "#64748b"}>
+                                      {node.symbolsCount}s
+                                    </text>
+                                  </g>
+                                )}
                               </g>
                             );
                           })}
                         </svg>
 
-                        {/* Canvas legend */}
-                        <div className="absolute bottom-3 left-3 bg-slate-900/90 border border-slate-800 rounded-lg p-2 text-[10px] text-slate-400 space-y-1">
+                        {/* Visual Legend */}
+                        <div className="absolute bottom-3 left-3 bg-panel/90 dark:bg-slate-900/90 border border-rule dark:border-slate-800 rounded-lg p-2 text-[10px] text-ink-secondary dark:text-slate-400 space-y-1 backdrop-blur-sm pointer-events-none shadow-sm">
                           <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-accent" />
-                            <span>Standard Module</span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-sky-400" />
+                            <span>Entrypoint / Controller</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                            <span>Issues Flagged</span>
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                            <span>Routes & APIs</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-purple-400" />
+                            <span>Services & Logic</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                            <span>ML Engine & Models</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                            <span>Coupling Hotspot</span>
+                            <span>Data / DB / Hotspot</span>
                           </div>
                         </div>
+
+                        {/* Interactive Node Detail Inspector Drawer */}
+                        {focusedGraphNode && (() => {
+                          const activeNode = graphData.nodes.find((n) => n.id === focusedGraphNode);
+                          if (!activeNode) return null;
+                          const fileSymbols = (report.ast_insights?.functions || []).filter((f) => f?.file_path === activeNode.fullPath);
+                          const fileClasses = (report.ast_insights?.classes || []).filter((c) => c?.file_path === activeNode.fullPath);
+                          const fileIssues = (report.code_corrections || []).filter((c) => c.file_path === activeNode.fullPath);
+
+                          return (
+                            <div className="absolute right-3 top-3 bottom-3 w-80 bg-panel/95 dark:bg-slate-900/95 border border-rule dark:border-slate-800 rounded-xl shadow-lifted p-4 flex flex-col justify-between overflow-y-auto z-20 backdrop-blur-md animate-in slide-in-from-right-4">
+                              <div className="space-y-3">
+                                {/* Header */}
+                                <div className="flex items-start justify-between gap-2 border-b border-rule dark:border-slate-800 pb-2.5">
+                                  <div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-sm">{activeNode.icon}</span>
+                                      <span className="text-xs font-mono font-bold text-ink dark:text-white truncate max-w-[190px]">
+                                        {activeNode.label}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] font-mono text-ink-secondary dark:text-slate-400 block truncate mt-0.5">
+                                      {activeNode.fullPath}
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => setFocusedGraphNode(null)}
+                                    className="p-1 rounded-md text-ink-secondary dark:text-slate-400 hover:bg-ground-muted dark:hover:bg-slate-800"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                {/* Layer & Hotspot Badges */}
+                                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                  <span
+                                    className="px-2 py-0.5 rounded font-medium"
+                                    style={{ backgroundColor: `${activeNode.color}20`, color: activeNode.color }}
+                                  >
+                                    {activeNode.tierLabel}
+                                  </span>
+                                  {activeNode.isHotspot && (
+                                    <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-semibold border border-rose-500/30">
+                                      🔥 Coupling Hotspot
+                                    </span>
+                                  )}
+                                  {activeNode.hasIssues && (
+                                    <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium border border-amber-500/30">
+                                      {activeNode.issuesCount} flagged issue{activeNode.issuesCount > 1 ? "s" : ""}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Call Graph Relationships */}
+                                <div className="space-y-2 pt-1">
+                                  <div className="text-[11px] font-semibold text-ink dark:text-slate-300">
+                                    Call-Graph Relationships
+                                  </div>
+                                  
+                                  {/* Inbound Callers */}
+                                  <div>
+                                    <span className="text-[10px] text-ink-secondary dark:text-slate-400 block mb-1">
+                                      ⬅️ Incoming Callers ({activeNode.inboundCallers.length}):
+                                    </span>
+                                    {activeNode.inboundCallers.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {activeNode.inboundCallers.map((c: string, i: number) => (
+                                          <button
+                                            key={i}
+                                            onClick={() => setFocusedGraphNode(c)}
+                                            className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono hover:bg-emerald-500/25"
+                                          >
+                                            {c.split("/").pop()}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-[10px] text-slate-500 italic">None (Root or Entrypoint)</span>
+                                    )}
+                                  </div>
+
+                                  {/* Outbound Dependencies */}
+                                  <div>
+                                    <span className="text-[10px] text-ink-secondary dark:text-slate-400 block mb-1">
+                                      ➡️ Dependencies Imported ({activeNode.outboundDependencies.length}):
+                                    </span>
+                                    {activeNode.outboundDependencies.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1">
+                                        {activeNode.outboundDependencies.map((d: string, i: number) => (
+                                          <button
+                                            key={i}
+                                            onClick={() => setFocusedGraphNode(d)}
+                                            className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/20 text-[10px] font-mono hover:bg-sky-500/25"
+                                          >
+                                            {d.split("/").pop()}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-[10px] text-slate-500 italic">Leaf module</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Exported Symbols */}
+                                <div className="space-y-1 pt-1">
+                                  <span className="text-[11px] font-semibold text-ink dark:text-slate-300 block">
+                                    Exported Symbols ({fileSymbols.length + fileClasses.length}):
+                                  </span>
+                                  <div className="max-h-28 overflow-y-auto space-y-1">
+                                    {fileClasses.map((cls, i) => (
+                                      <div key={i} className="text-[10px] font-mono text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
+                                        class {cls.name} (L{cls.start_line})
+                                      </div>
+                                    ))}
+                                    {fileSymbols.map((sym, i) => (
+                                      <div key={i} className="text-[10px] font-mono text-accent bg-accent/10 px-1.5 py-0.5 rounded">
+                                        fn {sym.name}() (L{sym.start_line})
+                                      </div>
+                                    ))}
+                                    {fileClasses.length === 0 && fileSymbols.length === 0 && (
+                                      <span className="text-[10px] text-slate-500 italic">No AST definitions extracted</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Issues on this file */}
+                                {fileIssues.length > 0 && (
+                                  <div className="space-y-1 pt-1">
+                                    <span className="text-[11px] font-semibold text-rose-400 block">
+                                      Flagged Vulnerabilities:
+                                    </span>
+                                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                                      {fileIssues.map((iss, i) => (
+                                        <div key={i} className="p-1.5 rounded bg-rose-500/10 border border-rose-500/20 text-[10px] text-rose-300">
+                                          <span className="font-bold">{iss.category.toUpperCase()} (L{iss.start_line}):</span> {iss.explanation.slice(0, 60)}…
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Action: Jump to Source */}
+                              <div className="pt-3 border-t border-rule dark:border-slate-800">
+                                <button
+                                  onClick={() => {
+                                    setSelectedFilePath(activeNode.fullPath);
+                                    setReportSubTab("files");
+                                  }}
+                                  className="w-full btn-primary !text-xs !py-1.5 flex items-center justify-center gap-1.5"
+                                >
+                                  <FileCode className="w-3.5 h-3.5" />
+                                  <span>Inspect File Source</span>
+                                  <ArrowRight className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 

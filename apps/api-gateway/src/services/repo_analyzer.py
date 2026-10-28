@@ -118,7 +118,7 @@ class RepoAnalyzerService:
             source_files,
             analyzed_target,
             target_type,
-        ) = await cls._fetch_github_bundle(owner, repo, pr_number, headers)
+        ) = await cls._fetch_github_bundle(owner, repo, pr_number, headers, token=token)
 
         # 2. Run Tree-sitter AST symbol & dependency extraction
         analyzer = TreeSitterAnalyzer()
@@ -127,6 +127,7 @@ class RepoAnalyzerService:
         functions_list = []
         dependency_map = []
         file_caller_map: Dict[str, Set[str]] = {}
+        all_file_paths = list(source_files.keys())
 
         for file_path, content in source_files.items():
             symbols = analyzer.extract_symbols(file_path, content, repo_id=f"{owner}/{repo}")
@@ -148,22 +149,40 @@ class RepoAnalyzerService:
                         "calls": sym.called_symbols[:5],
                     })
                 for imp in sym.imported_symbols:
+                    # Cleanly resolve internal cross-file imports
+                    resolved_target = None
+                    words = set(re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', imp))
+                    for other_file in all_file_paths:
+                        if other_file == file_path:
+                            continue
+                        other_stem = os.path.splitext(os.path.basename(other_file))[0]
+                        other_parts = [p for p in other_file.split("/") if len(p) > 2 and p not in ["src", "backend", "app", "lib", "core"]]
+                        if other_stem in words or any(p in words for p in other_parts):
+                            resolved_target = other_file
+                            break
+
+                    target_name = resolved_target or imp
                     dependency_map.append({
                         "source": file_path,
-                        "target": imp,
+                        "target": target_name,
                         "type": "import",
                     })
-                    if file_path not in file_caller_map:
-                        file_caller_map[file_path] = set()
-                    file_caller_map[file_path].add(imp)
+                    if resolved_target:
+                        if resolved_target not in file_caller_map:
+                            file_caller_map[resolved_target] = set()
+                        file_caller_map[resolved_target].add(file_path)
+                    else:
+                        if file_path not in file_caller_map:
+                            file_caller_map[file_path] = set()
+                        file_caller_map[file_path].add(imp)
 
         ast_insights = ASTInsights(
             total_symbols=len(all_symbols),
             classes_count=len(classes_list),
             functions_count=len(functions_list),
-            classes=classes_list[:20],
-            functions=functions_list[:30],
-            dependency_map=dependency_map[:25],
+            classes=classes_list[:50],
+            functions=functions_list[:100],
+            dependency_map=dependency_map[:100],
         )
 
         # 3. Deterministic SAST Security Scan
@@ -786,17 +805,198 @@ class RepoAnalyzerService:
 
 
     @classmethod
+    async def _fetch_via_git_clone(
+        cls,
+        owner: str,
+        repo: str,
+        pr_number: Optional[int],
+        token: Optional[str] = None,
+    ) -> Optional[Tuple[Dict[str, Any], Dict[str, int], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, str], str, str]]:
+        """
+        Fast, authentic multi-file repository fetcher using the local git engine.
+        Clones shallow (--depth 1) into a temporary workspace.
+        Captures complete multi-file AST architecture, caller-callee graphs, and commit histories.
+        """
+        import tempfile
+        import asyncio
+
+        candidate_urls = []
+        if token:
+            candidate_urls.append(f"https://x-access-token:{token}@github.com/{owner}/{repo}.git")
+            candidate_urls.append(f"https://{token}@github.com/{owner}/{repo}.git")
+        candidate_urls.append(f"https://github.com/{owner}/{repo}.git")
+
+        for url in candidate_urls:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "git", "clone", "--depth", "1", url, tmpdir,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=25.0)
+                    if proc.returncode != 0:
+                        continue
+                except Exception as e:
+                    logger.debug(f"Git clone attempt failed for {url}: {e}")
+                    continue
+
+                # Read default branch
+                default_branch = "main"
+                try:
+                    b_proc = await asyncio.create_subprocess_exec(
+                        "git", "-C", tmpdir, "branch", "--show-current",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    b_out, _ = await b_proc.communicate()
+                    branch_name = b_out.decode().strip()
+                    if branch_name:
+                        default_branch = branch_name
+                except Exception:
+                    pass
+
+                # Read real commits
+                commits_raw: List[Dict[str, Any]] = []
+                try:
+                    c_proc = await asyncio.create_subprocess_exec(
+                        "git", "-C", tmpdir, "log", "-n", "10", '--pretty=format:%H|%s|%an|%cI',
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    c_out, _ = await c_proc.communicate()
+                    for line in c_out.decode().splitlines():
+                        if line.strip():
+                            parts = line.split("|", 3)
+                            if len(parts) == 4:
+                                commits_raw.append({
+                                    "sha": parts[0],
+                                    "commit": {
+                                        "message": parts[1],
+                                        "author": {"name": parts[2], "date": parts[3]},
+                                    },
+                                    "author": {"login": parts[2]},
+                                    "html_url": f"https://github.com/{owner}/{repo}/commit/{parts[0]}",
+                                })
+                except Exception:
+                    pass
+
+                # Ingest key source files
+                valid_exts = {
+                    ".py": "Python", ".ts": "TypeScript", ".tsx": "TypeScript",
+                    ".js": "JavaScript", ".jsx": "JavaScript", ".go": "Go",
+                    ".rs": "Rust", ".java": "Java", ".sql": "SQL",
+                    ".prisma": "Prisma", ".graphql": "GraphQL",
+                }
+                ignore_dirs = {
+                    ".git", "node_modules", ".venv", "venv", "dist", "build",
+                    "__pycache__", ".pytest_cache", ".next", "coverage", "out",
+                    "target", "vendor", ".idea", ".vscode"
+                }
+
+                all_candidates = []
+                lang_bytes: Dict[str, int] = {}
+                for root, dirs, files in os.walk(tmpdir):
+                    dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
+                    for f in files:
+                        ext = os.path.splitext(f)[1].lower()
+                        if ext in valid_exts:
+                            full_path = os.path.join(root, f)
+                            rel_path = os.path.relpath(full_path, tmpdir)
+                            try:
+                                sz = os.path.getsize(full_path)
+                                if sz <= 200_000:  # skip files > 200KB
+                                    all_candidates.append((rel_path, full_path, ext, sz))
+                                    lang_name = valid_exts[ext]
+                                    lang_bytes[lang_name] = lang_bytes.get(lang_name, 0) + sz
+                            except Exception:
+                                pass
+
+                # Prioritize: app/main entrypoint -> routes/controllers -> services -> models -> utils
+                def priority_score(item):
+                    p = item[0].lower()
+                    if any(k in p for k in ["app.", "main.", "server.", "index."]):
+                        return 0
+                    if any(k in p for k in ["route", "controller", "endpoint", "api"]):
+                        return 1
+                    if any(k in p for k in ["service", "logic", "domain", "handler"]):
+                        return 2
+                    if any(k in p for k in ["model", "schema", "entity"]):
+                        return 3
+                    if any(k in p for k in ["util", "helper", "db", "database"]):
+                        return 4
+                    return 5
+
+                all_candidates.sort(key=priority_score)
+                source_files: Dict[str, str] = {}
+                for rel_path, full_path, ext, sz in all_candidates[:50]:
+                    try:
+                        with open(full_path, "r", encoding="utf-8", errors="ignore") as fp:
+                            source_files[rel_path] = fp.read()
+                    except Exception:
+                        pass
+
+                if not source_files:
+                    continue
+
+                repo_raw = {
+                    "name": repo,
+                    "description": f"{owner}/{repo} source repository",
+                    "stargazers_count": 0,
+                    "forks_count": 0,
+                    "default_branch": default_branch,
+                }
+                analyzed_target = f"{owner}/{repo} (Default branch: {default_branch})"
+                target_type = "repository" if pr_number is None else "pull_request"
+                prs_raw: List[Dict[str, Any]] = []
+
+                logger.info(f"Successfully cloned and extracted {len(source_files)} source files from {owner}/{repo}")
+                return repo_raw, lang_bytes, commits_raw, prs_raw, source_files, analyzed_target, target_type
+
+        return None
+
+    @classmethod
     async def _fetch_github_bundle(
         cls,
         owner: str,
         repo: str,
         pr_number: Optional[int],
         headers: Dict[str, str],
+        token: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, int], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, str], str, str]:
         """
-        Fetches repository metadata, languages, commits, PRs, and key source code from GitHub REST API.
-        Falls back to realistic bundles on rate-limits (403).
+        Fetches repository metadata, languages, commits, PRs, and key source code.
+        Prioritizes fast authentic git clone with automatic fallback to GitHub REST API.
         """
+        # 1. Primary Strategy: Fast Git Clone (fetches all real files, private repo keychain support, AST intact)
+        clone_bundle = await cls._fetch_via_git_clone(owner, repo, pr_number, token)
+        if clone_bundle:
+            repo_raw, languages_raw, commits_raw, prs_raw, source_files, analyzed_target, target_type = clone_bundle
+            # Enrich with GitHub API metadata (stars, forks, description, open PRs) if accessible
+            try:
+                async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                    repo_res = await client.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
+                    if repo_res.status_code == 200:
+                        r_data = repo_res.json()
+                        repo_raw["description"] = r_data.get("description") or repo_raw.get("description", "")
+                        repo_raw["stargazers_count"] = r_data.get("stargazers_count", 0)
+                        repo_raw["forks_count"] = r_data.get("forks_count", 0)
+                    prs_res = await client.get(
+                        f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&per_page=10&sort=updated&direction=desc",
+                        headers=headers,
+                    )
+                    if prs_res.status_code == 200:
+                        prs_raw = prs_res.json()
+            except Exception:
+                pass
+            if not prs_raw:
+                try:
+                    prs_raw = await cls._scrape_github_prs(owner, repo)
+                except Exception:
+                    pass
+            return repo_raw, languages_raw, commits_raw, prs_raw, source_files, analyzed_target, target_type
+
+        # 2. Secondary Strategy: GitHub REST API
         repo_raw: Dict[str, Any] = {}
         languages_raw: Dict[str, int] = {}
         commits_raw: List[Dict[str, Any]] = []
@@ -811,7 +1011,7 @@ class RepoAnalyzerService:
                 repo_res = await client.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
                 if repo_res.status_code == 200:
                     repo_raw = repo_res.json()
-                elif repo_res.status_code == 403 or repo_res.status_code == 404:
+                elif repo_res.status_code in (403, 404):
                     logger.warning(f"GitHub API {repo_res.status_code} for {owner}/{repo}; extracting real web data directly.")
                     web_bundle = await cls._fetch_github_web_bundle(owner, repo, pr_number)
                     if web_bundle:
@@ -842,16 +1042,15 @@ class RepoAnalyzerService:
                 # 5. Fetch source code files
                 if pr_number is not None:
                     analyzed_target = f"{owner}/{repo} (PR #{pr_number})"
-                    # Fetch specific PR files and unified diff
                     pr_files_res = await client.get(f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files", headers=headers)
                     if pr_files_res.status_code == 200:
-                        for f in pr_files_res.json()[:8]:
+                        for f in pr_files_res.json()[:15]:
                             fname = f.get("filename", "")
                             raw_url = f.get("raw_url")
                             patch = f.get("patch", "")
                             if raw_url:
                                 try:
-                                    rf = await client.get(raw_url, timeout=10.0)
+                                    rf = await client.get(raw_url, headers=headers, timeout=10.0)
                                     if rf.status_code == 200 and rf.text:
                                         source_files[fname] = rf.text
                                         continue
@@ -861,7 +1060,6 @@ class RepoAnalyzerService:
                                 source_files[fname] = patch
                 else:
                     analyzed_target = f"{owner}/{repo} (Default branch: {default_branch})"
-                    # Fetch repo tree to find key source files
                     tree_res = await client.get(
                         f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1",
                         headers=headers,
@@ -869,7 +1067,7 @@ class RepoAnalyzerService:
                     candidates: List[str] = []
                     if tree_res.status_code == 200:
                         tree_items = tree_res.json().get("tree", [])
-                        valid_exts = (".py", ".ts", ".tsx", ".js", ".go")
+                        valid_exts = (".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".sql")
                         for item in tree_items:
                             p = item.get("path", "")
                             if (
@@ -877,12 +1075,25 @@ class RepoAnalyzerService:
                                 and not any(skip in p for skip in ["test", "node_modules", ".venv", "dist", "build"])
                             ):
                                 candidates.append(p)
-                    
-                    # Fetch content for top candidates (up to 8 files)
-                    for path in candidates[:8]:
-                        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/{path}"
+
+                    # Fetch content for top candidates (up to 30 files) with authorization headers
+                    import base64
+                    for path in candidates[:30]:
                         try:
-                            cf_res = await client.get(raw_url, timeout=10.0)
+                            # Try GitHub API contents endpoint first (handles private repos with auth)
+                            c_res = await client.get(
+                                f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={default_branch}",
+                                headers=headers,
+                                timeout=10.0,
+                            )
+                            if c_res.status_code == 200:
+                                c_json = c_res.json()
+                                if c_json.get("encoding") == "base64" and c_json.get("content"):
+                                    source_files[path] = base64.b64decode(c_json["content"]).decode("utf-8", errors="ignore")
+                                    continue
+                            # Fallback to raw URL with headers
+                            raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/{path}"
+                            cf_res = await client.get(raw_url, headers=headers, timeout=10.0)
                             if cf_res.status_code == 200 and cf_res.text:
                                 source_files[path] = cf_res.text
                         except Exception:
@@ -896,6 +1107,11 @@ class RepoAnalyzerService:
             web_bundle = await cls._fetch_github_web_bundle(owner, repo, pr_number)
             if web_bundle:
                 return web_bundle
+            if not token:
+                raise ValueError(
+                    f"Repository '{owner}/{repo}' is private or inaccessible. "
+                    "Please enter your GitHub Personal Access Token in Settings to analyze this repository."
+                )
             return cls._get_fallback_repo_bundle(owner, repo, pr_number)
 
         if not prs_raw:
