@@ -153,6 +153,19 @@ export interface ExportReportResponse {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw err;
+    }
+    throw new Error(
+      `Cannot connect to backend at ${API_BASE}. Please ensure the FastAPI server is running on port 8000.`
+    );
+  }
+}
+
 /**
  * Executes deep live Git repository or pull request analysis.
  */
@@ -160,7 +173,7 @@ export async function analyzeGitRepository(
   req: RepoAnalysisRequest,
   signal?: AbortSignal
 ): Promise<RepoAnalysisReport> {
-  const res = await fetch(`${API_BASE}/api/v1/reviews/analyze-repo`, {
+  const res = await safeFetch(`${API_BASE}/api/v1/reviews/analyze-repo`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -179,7 +192,7 @@ export async function analyzeGitRepository(
  * Publishes line-by-line review comments directly to the target GitHub Pull Request.
  */
 export async function publishPRReview(req: PublishPRReviewRequest): Promise<PublishPRReviewResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/reviews/publish-pr-review`, {
+  const res = await safeFetch(`${API_BASE}/api/v1/reviews/publish-pr-review`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -197,7 +210,7 @@ export async function publishPRReview(req: PublishPRReviewRequest): Promise<Publ
  * Commits a suggested fix and opens a Pull Request on GitHub.
  */
 export async function createFixPR(req: CreateFixPRRequest): Promise<CreateFixPRResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/reviews/create-fix-pr`, {
+  const res = await safeFetch(`${API_BASE}/api/v1/reviews/create-fix-pr`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -215,7 +228,7 @@ export async function createFixPR(req: CreateFixPRRequest): Promise<CreateFixPRR
  * Generates SARIF or Markdown export of the audit report.
  */
 export async function exportReport(req: ExportReportRequest): Promise<ExportReportResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/reviews/export-report`, {
+  const res = await safeFetch(`${API_BASE}/api/v1/reviews/export-report`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),

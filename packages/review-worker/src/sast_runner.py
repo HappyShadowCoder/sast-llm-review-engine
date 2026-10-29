@@ -116,6 +116,9 @@ class SASTRunner:
                 self.semgrep_bin,
                 "scan",
                 "--json",
+                "--disable-version-check",
+                "--metrics=off",
+                "--no-git-ignore",
                 "--config=p/security-audit",
                 "--config=p/secrets",
                 "--config=p/owasp-top-ten",
@@ -125,7 +128,8 @@ class SASTRunner:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=6,
+                stdin=subprocess.DEVNULL,
             )
 
             if res.stdout:

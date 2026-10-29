@@ -191,9 +191,9 @@ export default function Home() {
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      const timer1 = setTimeout(() => setAnalysisStep(2), 600);
-      const timer2 = setTimeout(() => setAnalysisStep(3), 1300);
-      const timer3 = setTimeout(() => setAnalysisStep(4), 2100);
+      const timer1 = setTimeout(() => setAnalysisStep(2), 1200);
+      const timer2 = setTimeout(() => setAnalysisStep(3), 2800);
+      const timer3 = setTimeout(() => setAnalysisStep(4), 5000);
 
       try {
         const req: RepoAnalysisRequest = {
@@ -844,16 +844,49 @@ export default function Home() {
                 <div className="flex items-center gap-3">
                   <RefreshCw className="w-5 h-5 text-accent animate-spin" />
                   <div>
-                    <h3 className="text-sm font-display font-bold text-ink">Analyzing Repository & AST Structure</h3>
-                    <p className="text-xs text-ink-secondary">Ingesting unified diffs, running Tree-sitter and SAST security gates...</p>
+                    <h3 className="text-sm font-display font-bold text-ink">
+                      {analysisStep === 1 && "Fetching Git Repository & Commits..."}
+                      {analysisStep === 2 && "Extracting Tree-sitter AST & Call Graph..."}
+                      {analysisStep === 3 && "Running SAST Deterministic Security Rules..."}
+                      {analysisStep >= 4 && "Synthesizing Architectural Review & Fix Suggestions..."}
+                    </h3>
+                    <p className="text-xs text-ink-secondary">
+                      {analysisStep === 1 && "Connecting to repository, loading shallow commit tree and files..."}
+                      {analysisStep === 2 && "Walking syntax trees, scoping functions, classes, and cross-file references..."}
+                      {analysisStep === 3 && "Auditing code against OWASP Top 10, SQLi, command injection, and secret rules..."}
+                      {analysisStep >= 4 && "Assembling cross-file context, generating code corrections, and calculating health score..."}
+                    </p>
                   </div>
                 </div>
-                <span className="text-xs font-mono font-bold text-accent">Step {analysisStep} of 4</span>
+                <div className="text-right">
+                  <span className="text-xs font-mono font-bold text-accent">
+                    {analysisStep <= 4 ? `Step ${analysisStep} of 4` : "Complete"}
+                  </span>
+                  <span className="block text-[10px] text-ink-secondary">
+                    {analysisStep === 1 && "25%"}
+                    {analysisStep === 2 && "50%"}
+                    {analysisStep === 3 && "75%"}
+                    {analysisStep === 4 && "88% (processing)"}
+                    {analysisStep >= 5 && "100%"}
+                  </span>
+                </div>
               </div>
-              <div className="w-full bg-ground-muted rounded-full h-1.5 overflow-hidden">
+              <div className="w-full bg-ground-muted rounded-full h-2 overflow-hidden">
                 <div
-                  className="bg-accent h-1.5 rounded-full transition-all duration-300"
-                  style={{ width: `${(analysisStep / 4) * 100}%` }}
+                  className={`bg-accent h-2 rounded-full transition-all duration-500 ${analysisStep === 4 ? "animate-pulse" : ""}`}
+                  style={{
+                    width: `${
+                      analysisStep === 1
+                        ? 25
+                        : analysisStep === 2
+                        ? 50
+                        : analysisStep === 3
+                        ? 75
+                        : analysisStep === 4
+                        ? 88
+                        : 100
+                    }%`,
+                  }}
                 />
               </div>
             </div>
