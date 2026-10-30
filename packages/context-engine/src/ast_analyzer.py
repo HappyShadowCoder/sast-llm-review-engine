@@ -14,20 +14,15 @@ from .models import CodeSymbol, EnclosingScope
 
 class TreeSitterAnalyzer:
     def __init__(self):
-        self._parsers: Dict[str, Parser] = {}
+        self._languages: Dict[str, Language] = {}
         self._init_parsers()
 
     def _init_parsers(self):
         try:
-            py_lang = Language(tspython.language())
-            ts_lang = Language(tstypescript.language_typescript())
-            tsx_lang = Language(tstypescript.language_tsx())
-            go_lang = Language(tsgo.language())
-
-            self._parsers["python"] = Parser(py_lang)
-            self._parsers["typescript"] = Parser(ts_lang)
-            self._parsers["tsx"] = Parser(tsx_lang)
-            self._parsers["go"] = Parser(go_lang)
+            self._languages["python"] = Language(tspython.language())
+            self._languages["typescript"] = Language(tstypescript.language_typescript())
+            self._languages["tsx"] = Language(tstypescript.language_tsx())
+            self._languages["go"] = Language(tsgo.language())
         except Exception:
             pass
 
@@ -46,7 +41,13 @@ class TreeSitterAnalyzer:
         return None
 
     def get_parser(self, language: str) -> Optional[Parser]:
-        return self._parsers.get(language)
+        lang_obj = self._languages.get(language)
+        if lang_obj:
+            try:
+                return Parser(lang_obj)
+            except Exception:
+                return None
+        return None
 
     def parse_source(self, file_path: str, source_code: str):
         lang = self.detect_language(file_path)
@@ -429,10 +430,13 @@ class TreeSitterAnalyzer:
         return None
 
     def _extract_signature(self, node: Node, source_bytes: bytes, lang: str) -> str:
-        snippet = self._safe_slice(source_bytes, node.start_byte, node.end_byte)
-        if not snippet:
+        try:
+            snippet = self._safe_slice(source_bytes, node.start_byte, node.end_byte)
+            if not snippet:
+                return ""
+            return snippet.splitlines()[0].strip().rstrip(":{ \n\r")
+        except Exception:
             return ""
-        return snippet.splitlines()[0].strip().rstrip(":{ \n\r")
 
     def _extract_docstring(self, node: Node, source_bytes: bytes, lang: str) -> Optional[str]:
         try:

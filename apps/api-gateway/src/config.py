@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     GITHUB_WEBHOOK_SECRET: str = "test_github_secret"
     GITLAB_WEBHOOK_SECRET: str = "test_gitlab_secret"
 
+    # GitHub App Credentials
+    GITHUB_APP_ID: Optional[str] = None
+    GITHUB_APP_PRIVATE_KEY: Optional[str] = None
+    GITHUB_API_BASE: str = "https://api.github.com"
+
     # OpenAI / LLM
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o-mini"

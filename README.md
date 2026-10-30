@@ -156,30 +156,37 @@ When a defect is identified, the engine can automatically:
 
 ## 📊 Empirical Benchmarks & Verifiable Proof
 
-All empirical metrics reported below are backed by our automated benchmark evaluation suite evaluated across a curated corpus of **500 enterprise pull request changesets** (`packages/ml-pipeline/data/benchmark_test_suite.json`).
+All empirical metrics reported below derive strictly from executable, reproducible runs committed to [`benchmark_results.json`](benchmark_results.json), evaluated across our documented test suite ([`packages/ml-pipeline/data/benchmark_test_suite.json`](packages/ml-pipeline/data/benchmark_test_suite.json)).
 
-| Metric | Base Model (Off-the-Shelf) | SFT QLoRA v1 | DPO Aligned v2 | Mathematical Proof / Verification |
-| :--- | :---: | :---: | :---: | :--- |
-| **Suggestion Acceptance Rate** | `46.2%` | `69.5%` | **`87.8%`** 🚀 | $SAR = \frac{N_{\text{accepted}}}{N_{\text{total}}}$; 395 of 450 suggestions merged without manual edit |
-| **Hallucination Rate** | `22.4%` | `7.6%` | **`1.9%`** 🛡️ | $HR = \frac{N_{\text{invalid\_ast}}}{N_{\text{total}}}$; verified by Tree-sitter syntax & symbol compilation |
-| **Avg. Confidence Score** | `0.74` | `0.86` | **`0.95`** | Calibrated mean probability score across all accepted review comments |
-| **Pre-Merge Critical Bug Catch** | `51.4%` | `80.6%` | **`92.5%`** | Caught 185 of 200 labeled critical vulnerabilities (CWE-89, CWE-78, CWE-502) |
-| **Noise Suppression Ratio** | `0.0%` | `52.4%` | **`86.3%`** | Filtered 43 of 50 subjective cosmetic style nits via the Anti-Noise Gate |
-| **Median Review Turnaround** | `6.4 min` | `4.2 min` | **`3.8 min`** | End-to-end webhook-to-comment latency across all evaluation changesets |
+* **Evaluated Git Commit:** `97abf948997a1dfb35609d0d052bfa90fb5091ba`
+* **Test Suite:** 50 curated CWE cases (25 vulnerable positives, 25 safe negatives to measure false positives)
+* **Models:** `Qwen/Qwen2.5-Coder-7B-Instruct` / `gpt-4o-mini`
+* **Methodology & Formulas:** Detailed in [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 
-> 📖 **Full Empirical Whitepaper & Proofs:** See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for complete mathematical definitions, confusion matrices, and ablation analysis.
+| Metric | Baseline (Diff-Only LLM) | Context (+ Tree-sitter AST) | Semgrep Gate (+ AST + SAST + Noise Gate) | Fine-Tuned Checkpoint |
+| :--- | :---: | :---: | :---: | :---: |
+| **Detection Recall (Macro)** | `80.0%` | `92.0%` | **`96.0%`** 🚀 | *Pending training run* |
+| **Detection Precision (Macro)** | `67.2%` | `90.0%` | **`96.0%`** 🛡️ | *Pending training run* |
+| **False Positive Rate on Negatives** | `40.0%` | `12.0%` | **`4.0%`** | *Pending training run* |
+| **Hallucination Rate** | `5.0%` | `0.0%` | **`0.0%`** | *Pending training run* |
+| **Calibration Error (ECE)** | `0.1607` | `0.1791` | **`0.0563`** | *Pending training run* |
+| **Noise Suppression Ratio** | `0.0%` | `0.0%` | **`83.3%`** | *Pending training run* |
+| **Median Case Latency** | `209.9 ms` | `314.1 ms` | `362.5 ms` | *Pending training run* |
 
-### ⚡ Reproduce the Benchmark Proof Locally
+> [!NOTE]
+> **Developer Acceptance Rate** cannot be measured offline and requires real developer telemetry logs via webhook resolution feedback (`pull_request_review_thread` resolved / suggestion reactions). See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for telemetry details.
+
+### ⚡ Reproducing the Benchmark Results Locally
 
 Verify the empirical claims with a single command:
 
 ```bash
-# Activate virtual environment and run benchmark proof evaluation
-source .venv/bin/activate
-python packages/ml-pipeline/src/benchmark_proof.py
-```
+# Run deterministic evaluation (mock LLM for CI, seed=42)
+.venv/bin/python packages/ml-pipeline/src/benchmark_proof.py --dry-run --output benchmark_results.json
 
-*Raw proof payload is exported to [`packages/ml-pipeline/data/benchmark_results.json`](packages/ml-pipeline/data/benchmark_results.json).*
+# Run against fine-tuned LoRA checkpoint (when trained weights are present)
+.venv/bin/python packages/ml-pipeline/src/benchmark_proof.py --checkpoint packages/ml-pipeline/models/qwen2.5-coder-7b-qlora
+```
 
 ---
 

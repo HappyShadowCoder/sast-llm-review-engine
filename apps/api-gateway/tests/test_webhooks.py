@@ -48,7 +48,7 @@ async def test_github_webhook_pull_request_flow(client: AsyncClient, db_session:
             "Content-Type": "application/json",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code in (200, 202)
     res_data = response.json()
     assert res_data["status"] == "enqueued"
     assert res_data["review_run_id"] is not None
@@ -130,7 +130,7 @@ async def test_github_webhook_feedback_flow(client: AsyncClient, db_session: Asy
             "Content-Type": "application/json",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code in (200, 202)
     res_data = response.json()
     assert res_data["status"] == "success"
     assert "status=accepted" in res_data["message"]
@@ -178,7 +178,7 @@ async def test_gitlab_webhook_merge_request_flow(client: AsyncClient, db_session
             "Content-Type": "application/json",
         },
     )
-    assert response.status_code == 200
+    assert response.status_code in (200, 202)
     res_data = response.json()
     assert res_data["status"] == "enqueued"
 

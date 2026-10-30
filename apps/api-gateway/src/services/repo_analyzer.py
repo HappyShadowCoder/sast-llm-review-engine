@@ -9,8 +9,8 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
-from ..config import settings
-from ..schemas.review import (
+from config import settings
+from schemas.review import (
     ArchitectureAdvice,
     ASTInsights,
     CodeCorrection,
@@ -97,7 +97,9 @@ class RepoAnalyzerService:
         t0 = time.time()
         _ensure_engine_packages_loaded()
 
+        # pyrefly: ignore[missing-import]
         from context_engine import TreeSitterAnalyzer
+        # pyrefly: ignore[missing-import]
         from review_worker import SASTRunner
 
         owner, repo, pr_number = cls.parse_git_url(req.git_url)
@@ -149,7 +151,7 @@ class RepoAnalyzerService:
                         "calls": sym.called_symbols[:5],
                     })
                 for imp in sym.imported_symbols:
-                    # Cleanly resolve internal cross-file imports
+                    # Cleanly resolve internal cross-file imports or extract module name
                     resolved_target = None
                     words = set(re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', imp))
                     for other_file in all_file_paths:
@@ -161,20 +163,26 @@ class RepoAnalyzerService:
                             resolved_target = other_file
                             break
 
-                    target_name = resolved_target or imp
+                    # Extract clean module or package name if external
+                    if resolved_target:
+                        clean_import_name = resolved_target
+                    else:
+                        m_js = re.search(r'(?:from|require\()\s*["\']([^"\']+)["\']', imp)
+                        if m_js:
+                            clean_import_name = m_js.group(1)
+                        else:
+                            m_py = re.search(r'(?:from|import)\s+([a-zA-Z0-9_\.]+)', imp.strip())
+                            clean_import_name = m_py.group(1) if m_py else imp.strip()
+
                     dependency_map.append({
                         "source": file_path,
-                        "target": target_name,
+                        "target": clean_import_name,
                         "type": "import",
                     })
                     if resolved_target:
                         if resolved_target not in file_caller_map:
                             file_caller_map[resolved_target] = set()
                         file_caller_map[resolved_target].add(file_path)
-                    else:
-                        if file_path not in file_caller_map:
-                            file_caller_map[file_path] = set()
-                        file_caller_map[file_path].add(imp)
 
         ast_insights = ASTInsights(
             total_symbols=len(all_symbols),
@@ -338,6 +346,38 @@ class RepoAnalyzerService:
             first_file = next(iter(source_files.keys()))
             first_lines = source_files[first_file].splitlines()
             snippet = "\n".join(first_lines[:5]) if first_lines else "import os"
+            ext = os.path.splitext(first_file)[1].lower()
+
+            if ext in [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]:
+                explanation = "Enforce runtime environment variable validation and fail-fast startup configuration."
+                corrected_code = (
+                    "// Modern Architecture: Validate environment configuration at startup\n"
+                    "const requiredEnv = ['NODE_ENV', 'PORT'];\n"
+                    "for (const envKey of requiredEnv) {\n"
+                    "  if (!process.env[envKey]) {\n"
+                    "    console.warn(`[CONFIG WARNING] Missing environment variable: ${envKey}`);\n"
+                    "  }\n"
+                    "}"
+                )
+            elif ext == ".go":
+                explanation = "Enforce structured configuration loading with environment variable validation."
+                corrected_code = (
+                    "// Modern Architecture: Structured configuration loading\n"
+                    "type Config struct {\n"
+                    "\tPort string `env:\"PORT\" envDefault:\"8080\"`\n"
+                    "\tEnv  string `env:\"ENV\" envDefault:\"production\"`\n"
+                    "}"
+                )
+            else:
+                explanation = "Enforce strict type hinting and structured configuration management with pydantic-settings."
+                corrected_code = (
+                    "# Modern Architecture: Enforce strict environment validation\n"
+                    "from pydantic_settings import BaseSettings, SettingsConfigDict\n\n"
+                    "class AppConfig(BaseSettings):\n"
+                    "    model_config = SettingsConfigDict(env_file='.env', extra='ignore')\n"
+                    "    DEBUG: bool = False"
+                )
+
             code_corrections.append(
                 CodeCorrection(
                     id="arch-corr-1",
@@ -347,15 +387,9 @@ class RepoAnalyzerService:
                     severity="medium",
                     category="architecture",
                     confidence=0.88,
-                    explanation="Enforce strict type hinting and structured configuration management with pydantic-settings.",
+                    explanation=explanation,
                     original_code=snippet,
-                    corrected_code=(
-                        "# Modern Architecture: Enforce strict environment validation\n"
-                        "from pydantic_settings import BaseSettings, SettingsConfigDict\n\n"
-                        "class AppConfig(BaseSettings):\n"
-                        "    model_config = SettingsConfigDict(env_file='.env', extra='ignore')\n"
-                        "    DEBUG: bool = False"
-                    ),
+                    corrected_code=corrected_code,
                 )
             )
 
@@ -946,7 +980,11 @@ class RepoAnalyzerService:
                     "forks_count": 0,
                     "default_branch": default_branch,
                 }
-                analyzed_target = f"{owner}/{repo} (Default branch: {default_branch})"
+                analyzed_target = (
+                    f"{owner}/{repo} (Default branch: {default_branch})"
+                    if pr_number is None
+                    else f"{owner}/{repo} (PR #{pr_number})"
+                )
                 target_type = "repository" if pr_number is None else "pull_request"
                 prs_raw: List[Dict[str, Any]] = []
 
@@ -1059,7 +1097,11 @@ class RepoAnalyzerService:
                             if patch:
                                 source_files[fname] = patch
                 else:
-                    analyzed_target = f"{owner}/{repo} (Default branch: {default_branch})"
+                    analyzed_target = (
+                    f"{owner}/{repo} (Default branch: {default_branch})"
+                    if pr_number is None
+                    else f"{owner}/{repo} (PR #{pr_number})"
+                )
                     tree_res = await client.get(
                         f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1",
                         headers=headers,
@@ -1239,7 +1281,11 @@ class RepoAnalyzerService:
                         pass
 
                 prs_raw = await cls._scrape_github_prs(owner, repo)
-                analyzed_target = f"{owner}/{repo} (Default branch: {default_branch})" if pr_number is None else f"{owner}/{repo} (PR #{pr_number})"
+                analyzed_target = (
+                    f"{owner}/{repo} (Default branch: {default_branch})"
+                    if pr_number is None
+                    else f"{owner}/{repo} (PR #{pr_number})"
+                )
                 target_type = "repository" if pr_number is None else "pull_request"
 
                 if source_files:
