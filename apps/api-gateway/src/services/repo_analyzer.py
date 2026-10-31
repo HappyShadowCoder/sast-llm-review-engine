@@ -9,26 +9,48 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
-from config import settings
-from schemas.review import (
-    ArchitectureAdvice,
-    ASTInsights,
-    CodeCorrection,
-    CommitReportItem,
-    CouplingHotspot,
-    CreateFixPRRequest,
-    CreateFixPRResponse,
-    ExportReportRequest,
-    ExportReportResponse,
-    FileTreeItem,
-    PRReportItem,
-    PublishPRReviewRequest,
-    PublishPRReviewResponse,
-    RepoAnalysisReport,
-    RepoAnalysisRequest,
-    RepoSummary,
-    ScalabilityBottleneck,
-)
+try:
+    from ..config import settings
+    from ..schemas.review import (
+        ArchitectureAdvice,
+        ASTInsights,
+        CodeCorrection,
+        CommitReportItem,
+        CouplingHotspot,
+        CreateFixPRRequest,
+        CreateFixPRResponse,
+        ExportReportRequest,
+        ExportReportResponse,
+        FileTreeItem,
+        PRReportItem,
+        PublishPRReviewRequest,
+        PublishPRReviewResponse,
+        RepoAnalysisReport,
+        RepoAnalysisRequest,
+        RepoSummary,
+        ScalabilityBottleneck,
+    )
+except (ImportError, ValueError):
+    from config import settings
+    from schemas.review import (
+        ArchitectureAdvice,
+        ASTInsights,
+        CodeCorrection,
+        CommitReportItem,
+        CouplingHotspot,
+        CreateFixPRRequest,
+        CreateFixPRResponse,
+        ExportReportRequest,
+        ExportReportResponse,
+        FileTreeItem,
+        PRReportItem,
+        PublishPRReviewRequest,
+        PublishPRReviewResponse,
+        RepoAnalysisReport,
+        RepoAnalysisRequest,
+        RepoSummary,
+        ScalabilityBottleneck,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -341,61 +363,25 @@ class RepoAnalyzerService:
                 )
             )
 
-        # If zero corrections found, add a clean architectural hardening correction
-        if not code_corrections and source_files:
-            first_file = next(iter(source_files.keys()))
-            first_lines = source_files[first_file].splitlines()
-            snippet = "\n".join(first_lines[:5]) if first_lines else "import os"
-            ext = os.path.splitext(first_file)[1].lower()
-
-            if ext in [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]:
-                explanation = "Enforce runtime environment variable validation and fail-fast startup configuration."
-                corrected_code = (
-                    "// Modern Architecture: Validate environment configuration at startup\n"
-                    "const requiredEnv = ['NODE_ENV', 'PORT'];\n"
-                    "for (const envKey of requiredEnv) {\n"
-                    "  if (!process.env[envKey]) {\n"
-                    "    console.warn(`[CONFIG WARNING] Missing environment variable: ${envKey}`);\n"
-                    "  }\n"
-                    "}"
-                )
-            elif ext == ".go":
-                explanation = "Enforce structured configuration loading with environment variable validation."
-                corrected_code = (
-                    "// Modern Architecture: Structured configuration loading\n"
-                    "type Config struct {\n"
-                    "\tPort string `env:\"PORT\" envDefault:\"8080\"`\n"
-                    "\tEnv  string `env:\"ENV\" envDefault:\"production\"`\n"
-                    "}"
-                )
-            else:
-                explanation = "Enforce strict type hinting and structured configuration management with pydantic-settings."
-                corrected_code = (
-                    "# Modern Architecture: Enforce strict environment validation\n"
-                    "from pydantic_settings import BaseSettings, SettingsConfigDict\n\n"
-                    "class AppConfig(BaseSettings):\n"
-                    "    model_config = SettingsConfigDict(env_file='.env', extra='ignore')\n"
-                    "    DEBUG: bool = False"
-                )
-
-            code_corrections.append(
-                CodeCorrection(
-                    id="arch-corr-1",
-                    file_path=first_file,
-                    start_line=1,
-                    end_line=min(5, len(first_lines) or 1),
-                    severity="medium",
-                    category="architecture",
-                    confidence=0.88,
-                    explanation=explanation,
-                    original_code=snippet,
-                    corrected_code=corrected_code,
-                )
-            )
+        # Calculate health score accurately based on genuine findings
+        # 100 base score; deduct only for genuine validated findings
+        deduction = 0
+        for c in code_corrections:
+            if c.severity == "critical":
+                deduction += 20
+            elif c.severity == "high":
+                deduction += 10
+            elif c.severity == "medium":
+                deduction += 5
+        health_score = max(50, 100 - deduction)
 
         # Build Architecture Advice
         arch_advice = ArchitectureAdvice(
-            overall_critique="Modular codebase with healthy separation of concerns. Maintain strong cross-file abstraction boundaries.",
+            overall_critique=(
+                "All scanned files passed deterministic security & anti-noise gates with zero critical findings."
+                if not code_corrections
+                else "Modular codebase with healthy separation of concerns. Address flagged security and architectural items."
+            ),
             coupling_hotspots=[],
             scalability_bottlenecks=[],
             refactoring_recommendations=[
