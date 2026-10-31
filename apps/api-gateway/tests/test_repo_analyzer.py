@@ -147,3 +147,85 @@ async def test_export_report_sarif_and_markdown(client: AsyncClient):
     assert "Security Audit Report" in md_body["content"]
     assert md_body["filename"].endswith(".md")
 
+
+def test_dynamic_mermaid_diagram_synthesis():
+    """Validates dynamic, non-hardcoded GitDiagram generation across repository types."""
+    from services.repo_analyzer import RepoAnalyzerService
+
+    # 1. Static Site Generator (e.g. mapc-site)
+    mapc_files = {
+        "index.html": "<html>Landing</html>",
+        "changelog.html": "<html>Releases</html>",
+        "wall.html": "<html>Wall of Fame</html>",
+        "site.js": "fetch('/supporters.json')",
+        "supporters.json": '{"supporters": []}',
+        "build.py": "def build(): pass",
+        "downloads.json": '{"releases": []}',
+    }
+    mapc_diag = RepoAnalyzerService._generate_system_mermaid_diagram(
+        owner="abduzeedo",
+        repo="mapc-site",
+        source_files=mapc_files,
+        all_symbols=[],
+        dependency_map=[{"source": "site.js", "target": "supporters.json", "type": "fetch"}],
+        coupling_hotspots=[],
+    )
+    assert "Web Pages & Views" in mapc_diag
+    assert "Client Scripts & Components" in mapc_diag
+    assert "Data Feeds & Config" in mapc_diag
+    assert "Build Automation" in mapc_diag
+    assert "apps/dashboard" not in mapc_diag
+
+    # 2. Monorepo (e.g. sast-llm-review-engine)
+    monorepo_files = {
+        "apps/dashboard/src/app/page.tsx": "export default function Home() {}",
+        "apps/api-gateway/src/main.py": "from fastapi import FastAPI; app = FastAPI()",
+        "packages/context-engine/src/analyzer.py": "class TreeSitterAnalyzer: pass",
+        "packages/review-worker/src/runner.py": "class SASTRunner: pass",
+        "packages/ml-pipeline/src/train.py": "def train(): pass",
+    }
+    mono_diag = RepoAnalyzerService._generate_system_mermaid_diagram(
+        owner="HappyShadowCoder",
+        repo="sast-llm-review-engine",
+        source_files=monorepo_files,
+        all_symbols=[],
+        dependency_map=[
+            {"source": "apps/api-gateway/src/main.py", "target": "packages/context-engine/src/analyzer.py", "type": "import"}
+        ],
+        coupling_hotspots=[],
+    )
+    assert "apps/dashboard" in mono_diag
+    assert "apps/api-gateway" in mono_diag
+    assert "packages/context-engine" in mono_diag
+    assert "packages/review-worker" in mono_diag
+    assert "packages/ml-pipeline" in mono_diag
+    assert "DirectX" not in mono_diag
+    assert "Wall of Fame" not in mono_diag
+
+    # 3. Generic Backend Microservice
+    generic_files = {
+        "api/routes.py": "def route(): pass",
+        "services/user_service.py": "def get_user(): pass",
+        "models/user.py": "class User: pass",
+        "workers/task_queue.py": "def process_task(): pass",
+    }
+    generic_diag = RepoAnalyzerService._generate_system_mermaid_diagram(
+        owner="test-org",
+        repo="backend-api",
+        source_files=generic_files,
+        all_symbols=[],
+        dependency_map=[
+            {"source": "api/routes.py", "target": "services/user_service.py", "type": "import"},
+            {"source": "services/user_service.py", "target": "models/user.py", "type": "import"},
+        ],
+        coupling_hotspots=[],
+    )
+    assert "api" in generic_diag
+    assert "services" in generic_diag
+    assert "models" in generic_diag
+    assert "workers" in generic_diag
+    assert "DirectX" not in generic_diag
+    assert "apps/dashboard" not in generic_diag
+
+
+
