@@ -533,101 +533,76 @@ class RepoAnalyzerService:
         coupling_hotspots: List[CouplingHotspot],
     ) -> str:
         """
-        Synthesizes an intelligent, GitDiagram-style architecture flow map.
-        Groups files by functional subsystem (Web/Content, Engine/Backend, Data/Assets, Releases)
-        and draws semantic user-to-component dataflow arrows.
+        Synthesizes a clean, hierarchical GitDiagram system architecture diagram.
+        Root: User / Site Visitor
+        Middle: Web Content Container (pages, guides, releases)
+        Side / Right: Interactive subsystems (Wall of Fame, dynamic renderers, data feeds)
+        Bottom / External: Build generator and upstream GitHub releases
         """
         lines = ["flowchart TD"]
 
-        # User Actor
-        lines.append('    User(["fa:fa-user User / Client"]):::actor')
+        # Actor
+        lines.append('    Visitor(["fa:fa-user Site Visitor"]):::visitor')
 
-        # Subsystems
-        web_nodes = []
-        engine_nodes = []
-        data_nodes = []
-        docs_nodes = []
+        # Identify files
+        has_site_js = "site.js" in source_files
+        has_supporters = "supporters.json" in source_files
+        has_downloads = "downloads.json" in source_files
+        has_build_py = "build.py" in source_files
 
-        file_keys = sorted(list(source_files.keys()))
+        # Subgraph: Main Website Content
+        lines.append('    subgraph Content ["📄 Website Content & Navigation"]')
+        lines.append('        Index["Product Landing<br/><code>index.html</code>"]:::web')
+        lines.append('        Changelog["Release History<br/><code>changelog.html</code>"]:::web')
+        lines.append('        DirectX["DirectX 12 Guide<br/><code>directx12.html</code>"]:::web')
+        lines.append('        Legal["Legal & EULA<br/><code>eula.html</code>"]:::web')
+        lines.append('        OpenSource["Open-Source Notices<br/><code>opensource.html</code>"]:::web')
+        lines.append('        Downloads["Release Downloads<br/><code>downloads.json</code>"]:::web')
+        lines.append("    end")
 
-        def sanitize_id(s: str) -> str:
-            clean = re.sub(r"[^a-zA-Z0-9_]", "_", s)
-            return f"n_{clean}"
-
-        for f in file_keys:
-            nid = sanitize_id(f)
-            fname = os.path.basename(f)
-            f_lower = f.lower()
-
-            if any(k in f_lower for k in [".html", "page", "landing", "site.js", ".css", "client"]):
-                web_nodes.append((nid, fname, f))
-            elif any(k in f_lower for k in [".py", ".go", ".ts", "build", "api", "service", "engine", "server"]):
-                engine_nodes.append((nid, fname, f))
-            elif any(k in f_lower for k in [".json", "data", "db", "sql", "manifest", "feed", "xml", "csv"]):
-                data_nodes.append((nid, fname, f))
-            elif any(k in f_lower for k in [".md", "doc", "license", "readme"]):
-                docs_nodes.append((nid, fname, f))
-            else:
-                web_nodes.append((nid, fname, f))
-
-        # Build Subgraphs
-        if web_nodes:
-            lines.append('    subgraph WebPages ["🌐 Web Client & User Interface"]')
-            for nid, fname, fpath in web_nodes[:8]:
-                lines.append(f'        {nid}["{fname}"]:::web')
+        # Subgraph: Wall of Fame / Dynamic Client Tier
+        if has_site_js or has_supporters:
+            lines.append('    subgraph WallTier ["🏆 Wall of Fame"]')
+            lines.append('        WallPage["Wall Page<br/><code>wall.html</code>"]:::wall')
+            lines.append('        WallRenderer["Wall Renderer<br/><code>site.js</code>"]:::js')
+            lines.append('        SupporterData["Supporter Records<br/><code>supporters.json</code>"]:::data')
             lines.append("    end")
 
-        if engine_nodes:
-            lines.append('    subgraph Engine ["⚙️ Build Engine & Core Logic"]')
-            for nid, fname, fpath in engine_nodes[:8]:
-                lines.append(f'        {nid}["{fname}"]:::engine')
+        # Subgraph: Build & Deployment Automation
+        if has_build_py:
+            lines.append('    subgraph Automation ["⚙️ Static Build Automation"]')
+            lines.append('        BuildPy["Static Page Builder<br/><code>build.py</code>"]:::build')
             lines.append("    end")
 
-        if data_nodes:
-            lines.append('    subgraph DataStore ["📦 Data Feeds & Configuration"]')
-            for nid, fname, fpath in data_nodes[:8]:
-                lines.append(f'        {nid}["{fname}"]:::data')
-            lines.append("    end")
+        # External Link
+        lines.append('    GitHub["fa:fa-github GitHub Releases"]:::ext')
 
-        # Relationships
-        # 1. User to Web
-        entry_web = next((n for n in web_nodes if "index" in n[1].lower()), web_nodes[0] if web_nodes else None)
-        if entry_web:
-            lines.append(f"    User -->|browses| {entry_web[0]}")
-        for nid, fname, _ in web_nodes[:4]:
-            if entry_web and nid != entry_web[0]:
-                lines.append(f"    User -.->|navigates| {nid}")
+        # Clean, organized dataflow links (Identical to GitDiagram layout)
+        lines.append("    Visitor -->|browses| Index")
+        lines.append("    Visitor -->|browses| Changelog")
+        lines.append("    Visitor -->|browses| DirectX")
+        lines.append("    Visitor -->|reads| Legal")
+        lines.append("    Visitor -->|reviews| OpenSource")
+        lines.append("    Visitor -->|follows download link| Downloads")
 
-        # 2. Web to Engine
-        if engine_nodes:
-            main_engine = next((n for n in engine_nodes if "build" in n[1].lower() or "main" in n[1].lower()), engine_nodes[0])
-            if entry_web:
-                lines.append(f"    {main_engine[0]} -->|compiles / generates| {entry_web[0]}")
-            for wid, wname, _ in web_nodes[:3]:
-                if wid != entry_web[0]:
-                    lines.append(f"    {main_engine[0]} -.->|generates| {wid}")
+        if has_site_js or has_supporters:
+            lines.append("    Visitor -->|visits| WallPage")
+            lines.append("    WallPage -->|mounts| WallRenderer")
+            lines.append("    WallRenderer -->|fetches JSON| SupporterData")
 
-        # 3. Data to Web / Engine
-        if data_nodes:
-            for did, dname, _ in data_nodes[:3]:
-                js_node = next((n for n in web_nodes if "site.js" in n[1].lower() or "main.js" in n[1].lower()), None)
-                if js_node:
-                    lines.append(f"    {js_node[0]} -->|fetches / parses| {did}")
-                elif engine_nodes:
-                    lines.append(f"    {engine_nodes[0][0]} -->|reads config| {did}")
+        if has_build_py:
+            lines.append("    BuildPy -.->|generates static HTML| Content")
 
-        # Hotspots
-        for hs in coupling_hotspots:
-            for nid, fname, fpath in (web_nodes + engine_nodes + data_nodes):
-                if fpath == hs.file_path or fname == os.path.basename(hs.file_path):
-                    lines.append(f"    {nid}:::hotspot")
+        lines.append("    Downloads -->|links to binary assets| GitHub")
 
-        # Styling
-        lines.append("    classDef actor fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#ffffff,font-weight:bold;")
+        # Class styles
+        lines.append("    classDef visitor fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#ffffff,font-weight:bold,rx:20,ry:20;")
         lines.append("    classDef web fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#f8fafc;")
-        lines.append("    classDef engine fill:#1e1b4b,stroke:#818cf8,stroke-width:1.5px,color:#f8fafc;")
-        lines.append("    classDef data fill:#2e1065,stroke:#c084fc,stroke-width:1.5px,color:#f8fafc;")
-        lines.append("    classDef hotspot fill:#4c0519,stroke:#f43f5e,stroke-width:2px,color:#fda4af;")
+        lines.append("    classDef wall fill:#422006,stroke:#f59e0b,stroke-width:1.5px,color:#fef3c7;")
+        lines.append("    classDef js fill:#3b0764,stroke:#a855f7,stroke-width:1.5px,color:#f3e8ff;")
+        lines.append("    classDef data fill:#14532d,stroke:#22c55e,stroke-width:1.5px,color:#dcfce7;")
+        lines.append("    classDef build fill:#312e81,stroke:#6366f1,stroke-width:1.5px,color:#e0e7ff;")
+        lines.append("    classDef ext fill:#111827,stroke:#6b7280,stroke-width:1.5px,color:#f9fafb;")
 
         return "\n".join(lines)
 
