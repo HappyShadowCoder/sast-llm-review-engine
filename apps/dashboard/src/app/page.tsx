@@ -61,6 +61,7 @@ import {
   RepoAnalysisReport,
   RepoAnalysisRequest,
 } from "@/lib/api";
+import { MermaidViewer } from "@/components/MermaidViewer";
 
 interface SettingsState {
   provider: "openai" | "gemini";
@@ -114,7 +115,7 @@ export default function Home() {
   // Visual Call-Graph Canvas state
   const [graphZoom, setGraphZoom] = useState(1);
   const [focusedGraphNode, setFocusedGraphNode] = useState<string | null>(null);
-  const [graphLayoutMode, setGraphLayoutMode] = useState<"layered" | "cluster">("layered");
+  const [graphLayoutMode, setGraphLayoutMode] = useState<"gitdiagram" | "layered" | "cluster">("gitdiagram");
   const [graphTierFilter, setGraphTierFilter] = useState<string>("all");
   const [graphSearchQuery, setGraphSearchQuery] = useState<string>("");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -1015,6 +1016,16 @@ export default function Home() {
                           {/* Layout Toggle */}
                           <div className="flex items-center rounded-lg border border-rule dark:border-slate-800 bg-ground-muted dark:bg-slate-950 p-0.5">
                             <button
+                              onClick={() => setGraphLayoutMode("gitdiagram")}
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                                graphLayoutMode === "gitdiagram"
+                                  ? "bg-accent text-white shadow-sm"
+                                  : "text-ink-secondary dark:text-slate-400 hover:text-ink dark:hover:text-white"
+                              }`}
+                            >
+                              GitDiagram Flow
+                            </button>
+                            <button
                               onClick={() => setGraphLayoutMode("layered")}
                               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
                                 graphLayoutMode === "layered"
@@ -1022,7 +1033,7 @@ export default function Home() {
                                   : "text-ink-secondary dark:text-slate-400 hover:text-ink dark:hover:text-white"
                               }`}
                             >
-                              Layered Flow
+                              AST Modules
                             </button>
                             <button
                               onClick={() => setGraphLayoutMode("cluster")}
@@ -1032,7 +1043,7 @@ export default function Home() {
                                   : "text-ink-secondary dark:text-slate-400 hover:text-ink dark:hover:text-white"
                               }`}
                             >
-                              Orbit Cluster
+                              Radial Cluster
                             </button>
                           </div>
 
@@ -1115,6 +1126,12 @@ export default function Home() {
                       </div>
 
                       {/* Main Canvas Area */}
+                      {graphLayoutMode === "gitdiagram" ? (
+                        <MermaidViewer
+                          chart={report.architecture_advice?.mermaid_diagram || "flowchart TD\n  Start[System Start] --> End[System Ready]"}
+                          theme={theme}
+                        />
+                      ) : (
                       <div className="w-full h-[520px] rounded-lg bg-ground-muted/40 dark:bg-slate-950 border border-rule dark:border-slate-800 relative overflow-hidden flex items-center justify-center">
                         <svg
                           viewBox={`0 0 ${graphData.totalWidth} ${graphData.totalHeight}`}
@@ -1554,6 +1571,7 @@ export default function Home() {
                           );
                         })()}
                       </div>
+                      )}
                     </div>
 
                     {/* Executive Architectural Critique */}

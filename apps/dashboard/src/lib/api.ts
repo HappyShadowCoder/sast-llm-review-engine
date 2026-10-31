@@ -65,6 +65,7 @@ export interface ScalabilityBottleneck {
 
 export interface ArchitectureAdvice {
   overall_critique: string;
+  mermaid_diagram?: string;
   coupling_hotspots: CouplingHotspot[];
   scalability_bottlenecks: ScalabilityBottleneck[];
   refactoring_recommendations: string[];

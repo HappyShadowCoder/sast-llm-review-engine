@@ -184,6 +184,7 @@ class ScalabilityBottleneck(BaseModel):
 
 class ArchitectureAdvice(BaseModel):
     overall_critique: str
+    mermaid_diagram: Optional[str] = Field(None, description="Mermaid flowchart/architecture diagram of the system")
     coupling_hotspots: List[CouplingHotspot] = Field(default_factory=list)
     scalability_bottlenecks: List[ScalabilityBottleneck] = Field(default_factory=list)
     refactoring_recommendations: List[str] = Field(default_factory=list)
