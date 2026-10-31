@@ -111,7 +111,7 @@ class SASTRunner:
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 dest_path.write_text(content, encoding="utf-8")
 
-            # Execute Semgrep command
+            # Execute Semgrep command in offline mode (no network access per AGENTS.md)
             cmd = [
                 self.semgrep_bin,
                 "scan",
@@ -119,6 +119,7 @@ class SASTRunner:
                 "--disable-version-check",
                 "--metrics=off",
                 "--no-git-ignore",
+                "--offline",
                 "--config=p/security-audit",
                 "--config=p/secrets",
                 "--config=p/owasp-top-ten",

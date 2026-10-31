@@ -77,7 +77,12 @@ class TreeSitterAnalyzer:
         lang = self.detect_language(file_path)
         if lang == "python":
             return self._extract_python_symbols_native(file_path, source_code, repo_id, blob_sha)
-        
+
+        # For large frontend templates/TSX (>800 lines or >40KB), use fast regex extractor
+        # to prevent C-extension recursion stack overflows in tree-sitter on macOS ARM64
+        if len(source_code) > 40_000 or source_code.count("\n") > 800:
+            return self._extract_symbols_regex(file_path, source_code, repo_id, blob_sha)
+
         # Non-python: use Tree-sitter with error boundary and regex fallback
         try:
             return self._extract_symbols_treesitter(file_path, source_code, repo_id, blob_sha)
@@ -458,8 +463,13 @@ class TreeSitterAnalyzer:
         try:
             stack = [node]
             sb_len = len(source_bytes)
-            while stack:
+            visited = 0
+            while stack and visited < 200:
                 curr = stack.pop()
+                visited += 1
+                # Skip massive JSX DOM trees to prevent C-level stack overflow
+                if curr.type.startswith("jsx_"):
+                    continue
                 if curr.type in {"call", "call_expression"}:
                     func_node = curr.child_by_field_name("function")
                     if func_node:
@@ -483,8 +493,13 @@ class TreeSitterAnalyzer:
         try:
             stack = [node]
             sb_len = len(source_bytes)
-            while stack:
+            visited = 0
+            while stack and visited < 200:
                 curr = stack.pop()
+                visited += 1
+                # Skip massive JSX DOM trees to prevent C-level stack overflow
+                if curr.type.startswith("jsx_"):
+                    continue
                 if curr.type in {"type_identifier", "type", "type_reference"}:
                     s_b = max(0, min(sb_len, curr.start_byte))
                     e_b = max(s_b, min(sb_len, curr.end_byte))
@@ -500,20 +515,17 @@ class TreeSitterAnalyzer:
     def _extract_file_imports(self, root_node: Node, source_bytes: bytes, lang: str) -> List[str]:
         imports = []
         try:
-            stack = [root_node]
             sb_len = len(source_bytes)
-            while stack:
-                curr = stack.pop()
+            # Imports are top-level module declarations; iterate direct children only
+            for curr in root_node.named_children:
                 s_b = max(0, min(sb_len, curr.start_byte))
                 e_b = max(s_b, min(sb_len, curr.end_byte))
                 if lang == "python" and curr.type in {"import_statement", "import_from_statement"}:
                     imports.append(source_bytes[s_b:e_b].decode("utf-8", errors="replace").strip())
-                elif lang in {"typescript", "tsx"} and curr.type == "import_statement":
+                elif lang in {"typescript", "tsx"} and curr.type in {"import_statement", "import"}:
                     imports.append(source_bytes[s_b:e_b].decode("utf-8", errors="replace").strip())
                 elif lang == "go" and curr.type in {"import_declaration", "import_spec"}:
                     imports.append(source_bytes[s_b:e_b].decode("utf-8", errors="replace").strip())
-                for child in reversed(curr.named_children):
-                    stack.append(child)
         except Exception:
             pass
         return imports
