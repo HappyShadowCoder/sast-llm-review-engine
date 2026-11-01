@@ -92,10 +92,10 @@ def build_review_summary_body(
     out_of_diff_findings: List[LiveScanFinding],
 ) -> str:
     """Builds a formatted markdown summary for the single GitHub review."""
-    status_label = "⚠️ Issues Detected" if total_findings > 0 else "✅ Passed (Clean)"
+    status_label = "Issues Detected" if total_findings > 0 else "Passed (Clean)"
 
     summary = (
-        f"## 🤖 AICR Automated Code Review\n\n"
+        f"## AICR Automated Code Review\n\n"
         f"**Status:** {status_label}\n"
         f"- **Head Commit:** `{head_sha[:7]}`\n"
         f"- **Findings:** {total_findings} total ({inline_count} inline, {len(out_of_diff_findings)} in surrounding scope)\n"
@@ -103,7 +103,7 @@ def build_review_summary_body(
     )
 
     if out_of_diff_findings:
-        summary += "\n---\n### 🔍 Additional Findings (Outside PR Diff)\n"
+        summary += "\n---\n### Additional Findings (Outside PR Diff)\n"
         summary += (
             "The following potential issues were detected in unchanged lines or related caller/callee scopes:\n\n"
         )

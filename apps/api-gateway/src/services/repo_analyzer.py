@@ -403,7 +403,7 @@ class RepoAnalyzerService:
                         logger.warning("Could not fetch PR #%s head; analysing default branch", pr_number)
                         pr_number = None
 
-                source_files, langs = await asyncio.to_thread(cls._collect_files, tmp, changed)
+                source_files, langs = cls._collect_files(tmp, changed)
             except (asyncio.TimeoutError, OSError) as e:
                 logger.info("git clone path unavailable for %s/%s: %s", owner, repo, type(e).__name__)
                 return None
@@ -485,9 +485,10 @@ class RepoAnalyzerService:
                 return_exceptions=True,
             )
             tree = (_ok_json(tree_r) or {}).get("tree", [])
+            ingest_tuple = tuple(INGEST_EXTS.keys())
             paths = [
                 it["path"] for it in tree
-                if it.get("type") == "blob" and it["path"].endswith(CODE_EXTS)
+                if it.get("type") == "blob" and it["path"].endswith(ingest_tuple)
                 and not set(it["path"].split("/")) & IGNORE_DIRS
             ]
             paths.sort(key=lambda p: (p not in changed, _priority(p), p))
@@ -887,9 +888,9 @@ class RepoAnalyzerService:
         bundle = await cls._fetch_github_bundle(owner, repo, pr_number, token)
         files = bundle.source_files
 
-        # CPU-bound work off the event loop
-        ast = await asyncio.to_thread(cls._analyze_ast, TreeSitterAnalyzer(), files, f"{owner}/{repo}")
-        sast_findings = await asyncio.to_thread(SASTRunner().scan_files, files)
+        # Run AST symbol extraction & deterministic SAST analysis
+        ast = cls._analyze_ast(TreeSitterAnalyzer(), files, f"{owner}/{repo}")
+        sast_findings = SASTRunner().scan_files(files)
         hotspots = cls._coupling_hotspots(ast.callers)
         ast_insights = ASTInsights(
             total_symbols=len(ast.symbols), classes_count=len(ast.classes), functions_count=len(ast.functions),
@@ -1013,7 +1014,7 @@ class RepoAnalyzerService:
                 comments, unplaced = [], []
                 for f in req.findings:
                     body = (
-                        f"### 🛡️ AI Code Reviewer finding ({f.severity.upper()})\n\n"
+                        f"### AI Code Reviewer finding ({f.severity.upper()})\n\n"
                         f"**Category**: `{f.category}` | **Confidence**: `{int(f.confidence * 100)}%`\n\n{f.explanation}\n\n"
                         f"```suggestion\n{f.corrected_code.rstrip(chr(10))}\n```"
                     )
@@ -1112,7 +1113,7 @@ class RepoAnalyzerService:
                     return fail(f"Failed to commit remediation: {cls._gh_message(put)}")
 
                 pr_body = (
-                    f"## 🛡️ AI Code Reviewer Remediation\n\n"
+                    f"## AI Code Reviewer Remediation\n\n"
                     f"**Target File**: `{path}` (L{corr.start_line}-L{corr.end_line})\n"
                     f"**Category**: `{corr.category}` | **Severity**: `{corr.severity}`\n"
                     f"**Confidence**: `{int(corr.confidence * 100)}%`\n\n### Explanation\n{corr.explanation}\n\n"

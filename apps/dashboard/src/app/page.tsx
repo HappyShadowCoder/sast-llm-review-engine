@@ -255,7 +255,7 @@ export default function Home() {
         pr_url: gitUrl,
         github_token: settings.githubToken,
         findings: report.code_corrections,
-        summary_body: `## 🛡️ AI Code Reviewer Audit\n\nOverall Health Score: **${report.repo_summary.health_score}/100**\nIdentified **${report.code_corrections?.length || 0}** code remediations.`,
+        summary_body: `## AI Code Reviewer Audit\n\nOverall Health Score: **${report.repo_summary.health_score}/100**\nIdentified **${report.code_corrections?.length || 0}** code remediations.`,
       });
       setPublishStatus(res.message);
     } catch (err: any) {
@@ -346,21 +346,21 @@ export default function Home() {
   const getFileTier = useCallback((filePath: string) => {
     const p = filePath.toLowerCase();
     if (p.includes("app.") || p.includes("main.") || p.includes("server.") || p.includes("index.")) {
-      return { tier: "entry", label: "Entrypoint", color: "#38bdf8", stroke: "#0284c7", icon: "🌐" };
+      return { tier: "entry", label: "Entrypoint", color: "#38bdf8", stroke: "#0284c7" };
     }
     if (p.includes("route") || p.includes("controller") || p.includes("endpoint") || p.includes("api/")) {
-      return { tier: "routes", label: "Route API", color: "#34d399", stroke: "#059669", icon: "🚦" };
+      return { tier: "routes", label: "Route API", color: "#34d399", stroke: "#059669" };
     }
     if (p.includes("service") || p.includes("logic") || p.includes("domain") || p.includes("handler")) {
-      return { tier: "services", label: "Service", color: "#a855f7", stroke: "#7c3aed", icon: "⚙️" };
+      return { tier: "services", label: "Service", color: "#a855f7", stroke: "#7c3aed" };
     }
     if (p.includes("ml") || p.includes("model") || p.includes("ai") || p.includes("predict") || p.includes("train")) {
-      return { tier: "ml", label: "ML Engine", color: "#f59e0b", stroke: "#d97706", icon: "🧠" };
+      return { tier: "ml", label: "ML Engine", color: "#f59e0b", stroke: "#d97706" };
     }
     if (p.includes("util") || p.includes("db") || p.includes("database") || p.includes("schema") || p.includes("sql") || p.includes("store")) {
-      return { tier: "data", label: "Data / DB", color: "#f43f5e", stroke: "#e11d48", icon: "🗄️" };
+      return { tier: "data", label: "Data / DB", color: "#f43f5e", stroke: "#e11d48" };
     }
-    return { tier: "other", label: "Module", color: "#60a5fa", stroke: "#2563eb", icon: "📦" };
+    return { tier: "other", label: "Module", color: "#60a5fa", stroke: "#2563eb" };
   }, []);
 
   // Graph nodes & edges with GitDiagram-style layered column layout
@@ -493,7 +493,6 @@ export default function Home() {
             tierLabel: tierInfo.label,
             color: tierInfo.color,
             stroke: tierInfo.stroke,
-            icon: tierInfo.icon,
             x: colX,
             y: colY,
             width: CARD_W,
@@ -536,7 +535,6 @@ export default function Home() {
           tierLabel: tierInfo.label,
           color: tierInfo.color,
           stroke: tierInfo.stroke,
-          icon: tierInfo.icon,
           x,
           y,
           width: CARD_W,
@@ -1342,16 +1340,17 @@ export default function Home() {
                                   fill={node.color}
                                 />
 
-                                {/* Tier Icon & Tag */}
+                                {/* Tier Tag */}
+                                <circle cx="15" cy="13" r="3" fill={node.color} />
                                 <text
-                                  x="12"
+                                  x="22"
                                   y="16"
                                   fontSize="9"
                                   fontFamily="sans-serif"
                                   fontWeight="600"
                                   fill={node.color}
                                 >
-                                  {node.icon} {node.tierLabel}
+                                  {node.tierLabel}
                                 </text>
 
                                 {/* File Name */}
@@ -1371,7 +1370,7 @@ export default function Home() {
                                   <g transform={`translate(${node.width - 34}, 8)`}>
                                     <rect x="0" y="0" width="26" height="15" rx="4" fill="#881337" />
                                     <text x="13" y="11" textAnchor="middle" fontSize="8" fontFamily="sans-serif" fontWeight="bold" fill="#fecdd3">
-                                      {node.issuesCount} ⚠️
+                                      {node.issuesCount} err
                                     </text>
                                   </g>
                                 ) : (
@@ -1426,7 +1425,7 @@ export default function Home() {
                                 <div className="flex items-start justify-between gap-2 border-b border-rule dark:border-slate-800 pb-2.5">
                                   <div>
                                     <div className="flex items-center gap-1.5">
-                                      <span className="text-sm">{activeNode.icon}</span>
+                                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: activeNode.color }} />
                                       <span className="text-xs font-mono font-bold text-ink dark:text-white truncate max-w-[190px]">
                                         {activeNode.label}
                                       </span>
@@ -1452,8 +1451,9 @@ export default function Home() {
                                     {activeNode.tierLabel}
                                   </span>
                                   {activeNode.isHotspot && (
-                                    <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-semibold border border-rose-500/30">
-                                      🔥 Coupling Hotspot
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-semibold border border-rose-500/30">
+                                      <Flame className="w-3 h-3" />
+                                      Coupling Hotspot
                                     </span>
                                   )}
                                   {activeNode.hasIssues && (

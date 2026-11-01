@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ SAST-LLM Review Engine
+# SAST-LLM Review Engine
 ### *Enterprise Multi-VCS Engineering Quality & Automated PR Remediation Platform*
 
 <p align="center">
@@ -20,28 +20,28 @@
 
 <br/>
 
-[⚡ Quickstart](#-quickstart) • [🏛️ Architecture](#-system-architecture) • [✨ Key Features](#-key-features) • [📊 Benchmarks](#-empirical-benchmarks) • [🚀 Automated Fix PRs](#-1-click-remediation-prs) • [🛠️ Tech Stack](#-tech-stack)
+[Quickstart](#quickstart) • [Architecture](#system-architecture) • [Key Features](#key-features) • [Benchmarks](#empirical-benchmarks--verifiable-proof) • [Automated Fix PRs](#4-1-click-automated-fix-prs) • [Tech Stack](#tech-stack-matrix)
 
 ---
 
 </div>
 
-## 💡 Overview
+## Overview
 
 **SAST-LLM Review Engine** is a production-grade, multi-VCS AI code review assistant that integrates with **GitHub Pull Requests** and **GitLab Merge Requests**. 
 
 Unlike naive LLM wrappers that blindly paste raw `git diff` chunks into a prompt, this engine combines **Tree-sitter concrete syntax trees (CST)**, **2-hop caller/callee call-graphs**, and **deterministic Semgrep SAST security rules** to deliver:
-* 🎯 **Cross-file architectural reviews** with enclosed scope context.
-* 🔒 **Deterministic security flags** (OWASP, SQLi, command injection, auth bypasses).
-* ⚡ **1-click automated Fix PR creation** pushed directly to GitHub.
-* 🔇 **Anti-noise suppression** (`confidence < 0.80` and subjective style nits dropped).
-* 📈 **Engineering quality dashboard** in Next.js 14 with defect trends & coupling hotspots.
+* **Cross-file architectural reviews** with enclosed scope context.
+* **Deterministic security flags** (OWASP, SQLi, command injection, auth bypasses).
+* **1-click automated Fix PR creation** pushed directly to GitHub.
+* **Anti-noise suppression** (`confidence < 0.80` and subjective style nits dropped).
+* **Engineering quality dashboard** in Next.js 14 with defect trends & coupling hotspots.
 
 ---
 
-## ⚖️ Competitive Edge: CodeRabbit.ai vs. Naive Reviewers vs. SAST-LLM Review Engine
+## Competitive Edge: CodeRabbit vs. Naive Reviewers vs. SAST-LLM Review Engine
 
-| Feature | ❌ Naive LLM Diff Wrappers | 🐇 CodeRabbit.ai | 🛡️ SAST-LLM Review Engine |
+| Feature | Naive LLM Diff Wrappers | CodeRabbit | SAST-LLM Review Engine |
 | :--- | :--- | :--- | :--- |
 | **Context Scope** | Raw git diffs only (blind to imports) | Local PR diff chunks | **Tree-sitter CST + 2-hop caller/callee call graph** |
 | **Security Auditing** | Probabilistic hallucinations | LLM completion (hallucination-prone) | **Deterministic Semgrep SAST (40+ enterprise security rules)** |
@@ -53,38 +53,38 @@ Unlike naive LLM wrappers that blindly paste raw `git diff` chunks into a prompt
 
 ---
 
-## 🏛️ System Architecture
+## System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph VCS["🔗 Version Control Systems"]
+    subgraph VCS["Version Control Systems"]
         GH[GitHub PR / Repo URL]
         GL[GitLab MR Webhook]
     end
 
-    subgraph Gateway["⚙️ apps/api-gateway (FastAPI · Port 8000)"]
+    subgraph Gateway["apps/api-gateway (FastAPI · Port 8000)"]
         WH[Webhook Ingestion]
         RV[Reviews & PR Scanner Router]
         AN[Analytics & Hotspots Engine]
         DB[(SQLite / PostgreSQL\nReviewRun · ReviewComment\nPullRequest · Repository)]
     end
 
-    subgraph CtxEngine["🌲 packages/context-engine"]
+    subgraph CtxEngine["packages/context-engine"]
         DP[UnifiedDiffParser\nHunk Extraction & Line Ranges]
         TSA[TreeSitterAnalyzer\nAST Scopes · 2-Hop Call Graph\nSymbol Indexer]
     end
 
-    subgraph Worker["🔬 packages/review-worker"]
+    subgraph Worker["packages/review-worker"]
         SAST[SASTRunner\nSemgrep SAST · 40+ Security Rules]
         SR[StructuredReviewer\nPrompt Assembly · OpenAI / Gemini / Qwen]
         GATE[Anti-Noise Gate\nDrop < 0.80 Confidence\nDrop style_nitpick]
     end
 
-    subgraph Remediation["🚀 Automated PR Remediation"]
+    subgraph Remediation["Automated PR Remediation"]
         FIXPR[create_fix_pr Service\nGit Branch Refs · Tree Commit · Open PR]
     end
 
-    subgraph Dashboard["📊 apps/dashboard (Next.js 14 · Port 3000)"]
+    subgraph Dashboard["apps/dashboard (Next.js 14 · Port 3000)"]
         SCAN[Live Scan Panel\nURL · Model Picker · API Key Auth]
         KPI[KPI Scorecards\nCatch Rate · Acceptance · Turnaround]
         TRENDS[12-Week Defect Velocity Trends]
@@ -101,9 +101,9 @@ flowchart TD
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-### 1️⃣ Tree-Sitter AST & 2-Hop Call-Graph Engine
+### 1. Tree-Sitter AST & 2-Hop Call-Graph Engine
 > Located in [`packages/context-engine`](file:///packages/context-engine)
 
 - Parses code with language-specific **Tree-sitter** grammars (Python, TypeScript, JavaScript, Go, Rust, Java).
@@ -118,17 +118,17 @@ scopes = analyzer.extract_enclosing_scopes(file_path, content, modified_line_ran
 #        called_symbols=["db.execute", "fetchone"], imported_symbols=["Optional"])]
 ```
 
-### 2️⃣ Deterministic SAST Security Gate
+### 2. Deterministic SAST Security Gate
 > Located in [`packages/review-worker`](file:///packages/review-worker)
 
 - Executes **Semgrep OSS** rules for high-confidence vulnerability detection:
-  - 💉 SQL Injection & raw query formatting
-  - 🔑 Hardcoded secrets, API keys, and credentials
-  - 🔓 Unverified JWT signature verification
-  - ⚠️ Insecure deserialization & `eval()` invocation
+  - SQL Injection & raw query formatting
+  - Hardcoded secrets, API keys, and credentials
+  - Unverified JWT signature verification
+  - Insecure deserialization & `eval()` invocation
 - Deterministic findings receive automatic `confidence=0.96` flags.
 
-### 3️⃣ Strict Schema & Anti-Noise Gate
+### 3. Strict Schema & Anti-Noise Gate
 Every AI generation validates against a strict Pydantic v2 schema:
 
 ```python
@@ -146,7 +146,7 @@ class ReviewFinding(BaseModel):
 > [!IMPORTANT]
 > **Anti-Noise Policy:** Any finding with `confidence < 0.80` or `category == "style_nitpick"` is permanently suppressed before reaching the review comment stream.
 
-### 4️⃣ 1-Click Automated Fix PRs
+### 4. 1-Click Automated Fix PRs
 When a defect is identified, the engine can automatically:
 1. Create a remote git ref (`refs/heads/aicr-fix/...`).
 2. Commit the validated remediation block via GitHub Contents API.
@@ -154,7 +154,7 @@ When a defect is identified, the engine can automatically:
 
 ---
 
-## 📊 Empirical Benchmarks & Verifiable Proof
+## Empirical Benchmarks & Verifiable Proof
 
 All empirical metrics reported below derive strictly from executable, reproducible runs committed to [`benchmark_results.json`](benchmark_results.json), evaluated across our documented test suite ([`packages/ml-pipeline/data/benchmark_test_suite.json`](packages/ml-pipeline/data/benchmark_test_suite.json)).
 
@@ -165,8 +165,8 @@ All empirical metrics reported below derive strictly from executable, reproducib
 
 | Metric | Baseline (Diff-Only LLM) | Context (+ Tree-sitter AST) | Semgrep Gate (+ AST + SAST + Noise Gate) | Fine-Tuned Checkpoint |
 | :--- | :---: | :---: | :---: | :---: |
-| **Detection Recall (Macro)** | `80.0%` | `92.0%` | **`96.0%`** 🚀 | *Pending training run* |
-| **Detection Precision (Macro)** | `67.2%` | `90.0%` | **`96.0%`** 🛡️ | *Pending training run* |
+| **Detection Recall (Macro)** | `80.0%` | `92.0%` | **`96.0%`** | *Pending training run* |
+| **Detection Precision (Macro)** | `67.2%` | `90.0%` | **`96.0%`** | *Pending training run* |
 | **False Positive Rate on Negatives** | `40.0%` | `12.0%` | **`4.0%`** | *Pending training run* |
 | **Hallucination Rate** | `5.0%` | `0.0%` | **`0.0%`** | *Pending training run* |
 | **Calibration Error (ECE)** | `0.1607` | `0.1791` | **`0.0563`** | *Pending training run* |
@@ -176,7 +176,7 @@ All empirical metrics reported below derive strictly from executable, reproducib
 > [!NOTE]
 > **Developer Acceptance Rate** cannot be measured offline and requires real developer telemetry logs via webhook resolution feedback (`pull_request_review_thread` resolved / suggestion reactions). See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for telemetry details.
 
-### ⚡ Reproducing the Benchmark Results Locally
+### Reproducing the Benchmark Results Locally
 
 Verify the empirical claims with a single command:
 
@@ -190,30 +190,30 @@ Verify the empirical claims with a single command:
 
 ---
 
-## 📦 Monorepo Layout
+## Monorepo Layout
 
 ```text
 sast-llm-review-engine/
-├── ⚙️ apps/
+├── apps/
 │   ├── api-gateway/            # FastAPI: REST APIs, Webhook Ingestion, Scan Orchestrator
 │   │   ├── src/routers/        # Health, Reviews, Analytics, Webhooks
 │   │   ├── src/services/       # PRScannerService, RepoAnalyzerService, Fix PR Creator
 │   │   └── src/models/         # SQLAlchemy ORM: Repos, PullRequests, Comments
 │   └── dashboard/              # Next.js 14 App Router, TypeScript, Tailwind, Recharts
 │       └── src/app/page.tsx    # Live Scanner, KPI Scorecards, Trends, Prompt Viewer
-├── 🔬 packages/
+├── packages/
 │   ├── context-engine/         # Tree-sitter AST, unified diff parser, 2-hop call graph
 │   ├── review-worker/          # Semgrep SAST runner + Structured LLM reviewer
 │   └── ml-pipeline/            # QLoRA fine-tuning + TRL DPO alignment pipeline
-├── 🐳 infra/
+├── infra/
 │   └── docker-compose.yml      # PostgreSQL 16, Redis 7, Qdrant Vector DB
-└── 🧪 scripts/
+└── scripts/
     └── run_tests.sh            # Pytest test suite runner
 ```
 
 ---
 
-## ⚡ Quickstart
+## Quickstart
 
 ### Prerequisites
 * **Python 3.11+**
@@ -241,8 +241,8 @@ cp .env.example .env
 cd apps/api-gateway
 PYTHONPATH=. uvicorn src.main:app --host 127.0.0.1 --port 8000 --reload
 ```
-* 🟢 **Health Endpoint**: [http://localhost:8000/healthz](http://localhost:8000/healthz)
-* 📖 **Interactive Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
+* **Health Endpoint**: [http://localhost:8000/healthz](http://localhost:8000/healthz)
+* **Interactive Swagger UI**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ### 3. Launch the Next.js Quality Dashboard (Port 3000)
 
@@ -252,7 +252,7 @@ cd apps/dashboard
 npm install
 npm run dev
 ```
-* 🌐 **Dashboard UI**: [http://localhost:3000](http://localhost:3000)
+* **Dashboard UI**: [http://localhost:3000](http://localhost:3000)
 
 ### 4. Run a Live Repository / PR Scan
 
@@ -267,7 +267,7 @@ npm run dev
 
 ---
 
-## 🧪 Testing Suite
+## Testing Suite
 
 Run all test suites across the monorepo:
 
@@ -290,7 +290,7 @@ Or run targeted pytest suites:
 
 ---
 
-## 🛠️ Tech Stack Matrix
+## Tech Stack Matrix
 
 | Domain | Technologies |
 | :--- | :--- |
@@ -303,6 +303,6 @@ Or run targeted pytest suites:
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the **MIT License**. Built for engineering teams building reliable software at scale.

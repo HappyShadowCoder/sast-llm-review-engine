@@ -474,7 +474,7 @@ def test_line_to_diff_position_mapping():
         inline_count=len(inline_comments),
         out_of_diff_findings=out_of_diff,
     )
-    assert "## 🤖 AICR Automated Code Review" in summary
+    assert "## AICR Automated Code Review" in summary
     assert "Additional Findings (Outside PR Diff)" in summary
     assert "src/auth.py:90" in summary
     assert "src/config.py:5" in summary
@@ -612,7 +612,7 @@ async def test_execute_github_review_task_e2e_persistence(
     # Verify review was posted to GitHub
     assert "commit_id" in review_call_captured
     assert review_call_captured["commit_id"] == "sha_test_head_15"
-    assert "## 🤖 AICR Automated Code Review" in review_call_captured["body"]
+    assert "## AICR Automated Code Review" in review_call_captured["body"]
 
     # Verify DB persistence of ReviewRun and ReviewComments
     refreshed_run = (
